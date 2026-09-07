@@ -1,0 +1,169 @@
+name: CI
+
+# Everything that must hold before code reaches main. The guard runs first:
+# a scope violation is cheaper to see than a test failure, and it is the check
+# that keeps the unreleased paid part out of the branch under review.
+# No secrets, no deployment, no external service - this workflow only reads the
+# repository and runs the local toolchain.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Guard, typecheck, lint, test, benchmark, build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the repository
+        uses: actions/checkout@v4
+        with:
+          # Full history: the guard fails on paid code that was ever committed,
+          # and a shallow clone would hide exactly that.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Scope guard
+        run: npm run guard
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Generate the fixture vault
+        # The vault is git-ignored, so a fresh checkout has none, and without it
+        # every Searcher, fuzzy and filter test aborts in its beforeAll - 85
+        # tests that simply do not run. 2 000 notes is the generator's default
+        # and the count test/fixture-vault.test.ts insists on; the generator is
+        # seeded and emits notes in a fixed order, so this vault is a
+        # byte-for-byte prefix of the 10 000-note one used for the release
+        # measurement, and the manifest the assertions read is exact for it.
+        run: npm run fixtures -- --count 2000
+
+      - name: Test
+        run: npm test
+
+      - name: Benchmark, 2 000 notes
+        # 10 000 notes is the size the published numbers are measured at, and it
+        # is too slow and too memory-hungry to belong in every pull request. This
+        # run exists to catch a regression, not to produce release figures; the
+        # step after it is the gate. The benchmark's own budgets are calibrated
+        # on a developer workstation, so its exit code is not used here.
+        continue-on-error: true
+        run: npm run bench -- --count 2000 --runs 1 --json bench-ci.json
+
+      - name: Check the benchmark for a regression
+        run: |
+          cat > "$RUNNER_TEMP/check-bench.mjs" <<'CHECK_BENCH'
+          /*
+           * Budgets for a hosted runner, checked against the JSON the benchmark
+           * just wrote.
+           *
+           * They are NOT the project's performance targets. Those are stated for
+           * 10 000 notes in CLAUDE.md, the benchmark scales them linearly to the
+           * note count it ran at, and the README quotes what they measure on a
+           * known workstation. Gating on those here would go red for reasons
+           * that have nothing to do with the code, because a shared two-core
+           * runner is a few times slower than that workstation.
+           *
+           * So each budget below is about nine times what the same run costs on
+           * that workstation at 2 000 notes - cold index 361 ms, warm index
+           * 189 ms, incremental update 19 ms, worst search p95 25 ms, worst
+           * fuzzy p95 33 ms. A tenfold regression fails wherever it is measured;
+           * a runner three times slower than the workstation still has roughly
+           * three times the room it needs. That is the band a pull request has
+           * to police: a linear scan turned quadratic, an index rebuilt per
+           * keystroke, a candidate set that stopped being narrowed.
+           *
+           * The memory budget is the benchmark's own scaled one, unloosened:
+           * bytes do not depend on how fast the runner is.
+           */
+          import { readFileSync } from 'node:fs';
+
+          const EXPECTED_NOTE_COUNT = 2000;
+          const MEGABYTE = 1024 * 1024;
+          const BUDGETS = {
+            coldIndexMs: 3000,
+            warmIndexMs: 1800,
+            incrementalMs: 180,
+            searchP95Ms: 220,
+            fuzzyP95Ms: 300,
+            indexBytes: 20 * MEGABYTE,
+          };
+
+          const path = process.argv[2];
+          let report;
+          try {
+            report = JSON.parse(readFileSync(path, 'utf8'));
+          } catch (error) {
+            console.error(`No benchmark report at ${path}: ${error.message}`);
+            console.error('The benchmark step did not finish. Its log is the one to read, not this.');
+            process.exit(1);
+          }
+          const failures = [];
+
+          function check(name, measured, budget, unit) {
+            const scale = unit === 'MB' ? MEGABYTE : 1;
+            const shown = `${(measured / scale).toFixed(1)} ${unit}`;
+            const allowed = `${(budget / scale).toFixed(1)} ${unit}`;
+            const passed = measured <= budget;
+            console.log(`${passed ? 'ok  ' : 'FAIL'}  ${name.padEnd(34)} ${shown.padStart(12)}  budget ${allowed}`);
+            if (!passed) failures.push(`${name}: ${shown}, budget ${allowed}`);
+          }
+
+          function slowest(rows) {
+            return rows.reduce((worst, row) => (row.p95 > worst.p95 ? row : worst));
+          }
+
+          if (report.noteCount !== EXPECTED_NOTE_COUNT) {
+            failures.push(`benchmark ran at ${report.noteCount} notes, expected ${EXPECTED_NOTE_COUNT}`);
+          }
+
+          check('cold index', report.index.coldIndexMs, BUDGETS.coldIndexMs, 'ms');
+          check('warm index', report.index.warmIndexMs, BUDGETS.warmIndexMs, 'ms');
+          check('incremental update', report.index.incrementalMs, BUDGETS.incrementalMs, 'ms');
+          check('index memory', report.index.approximateBytes, BUDGETS.indexBytes, 'MB');
+
+          const exact = slowest(report.queries.exact);
+          check(`search p95, ${exact.label}`, exact.p95, BUDGETS.searchP95Ms, 'ms');
+          const fuzzy = slowest(report.queries.fuzzy);
+          check(`fuzzy p95, ${fuzzy.label}`, fuzzy.p95, BUDGETS.fuzzyP95Ms, 'ms');
+
+          if (failures.length > 0) {
+            console.error(`\n${failures.length} CI budget(s) missed:`);
+            for (const failure of failures) console.error(`  ${failure}`);
+            console.error('\nThese budgets are deliberately loose. Missing one means the engine got');
+            console.error('slower by an order of magnitude, not that the runner had a bad minute.');
+            process.exitCode = 1;
+          } else {
+            console.log('\nAll CI budgets met.');
+          }
+          CHECK_BENCH
+          node "$RUNNER_TEMP/check-bench.mjs" bench-ci.json
+
+      - name: Build
+        run: npm run build
+
+      - name: Scope guard on the built bundle
+        # The bundle is what actually ships: a flagged-off branch or an inlined
+        # translation block can carry strings the sources no longer show.
+        run: npm run guard

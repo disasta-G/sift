@@ -1,0 +1,173 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<title>Sift preview</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap">
+<style>
+/* --------------------------------------------------------------------------
+   Obsidian's own variables, filled with the exact values from
+   docs/mockup-dark.html and docs/mockup-light.html so the rendered overlay can
+   be compared with the mockup one to one.
+   -------------------------------------------------------------------------- */
+:root, .theme-dark {
+	--font-interface: Inter, -apple-system, "Segoe UI", system-ui, sans-serif;
+	--background-primary: #262626;
+	--background-secondary: #2a2a2a;
+	--background-modifier-border: #363636;
+	--background-modifier-border-focus: #4a4a4a;
+	--background-modifier-hover: #313131;
+	--background-modifier-cover: rgba(0, 0, 0, 0.45);
+	--modal-background: #262626;
+	--text-normal: #dadada;
+	--text-muted: #b3b3b3;
+	--text-faint: #666666;
+	--text-on-accent: #ffffff;
+	--text-highlight-bg: rgba(255, 208, 0, 0.38);
+	--interactive-accent: #7f6df2;
+	--interactive-accent-hover: #9a8cf5;
+	--toggle-thumb-color: #ffffff;
+	--radius-m: 6px;
+	--radius-l: 12px;
+	--shadow-l2: 0 8px 24px rgba(0, 0, 0, 0.38);
+	--shadow-l3: 0 24px 64px rgba(0, 0, 0, 0.55);
+	--size-4-2: 8px;
+	--input-shadow: none;
+	--icon-xs: 14px;
+	--icon-s: 16px;
+	--icon-m: 18px;
+	--icon-l: 24px;
+	--icon-size: var(--icon-m);
+	--icon-stroke: 1.75px;
+}
+
+/* Obsidian's own base rule for icons produced by setIcon(). Without it an
+   <svg> with no width/height attribute falls back to the CSS replaced-element
+   default of 300x150 and blows the layout apart — that is a property of the
+   host app, not of the plugin, so the preview has to provide it. */
+.svg-icon {
+	width: var(--icon-size);
+	height: var(--icon-size);
+	stroke-width: var(--icon-stroke);
+	stroke: currentColor;
+	fill: none;
+	stroke-linecap: round;
+	stroke-linejoin: round;
+	flex-shrink: 0;
+}
+
+.theme-light {
+	--background-primary: #f6f6f6;
+	--background-secondary: #ffffff;
+	--background-modifier-border: #e0e0e0;
+	--background-modifier-border-focus: #c8c8c8;
+	--background-modifier-hover: #ececec;
+	--background-modifier-cover: rgba(0, 0, 0, 0.25);
+	--modal-background: #f6f6f6;
+	--text-normal: #222222;
+	--text-muted: #5c5c5c;
+	--text-faint: #999999;
+	--text-highlight-bg: rgba(255, 208, 0, 0.45);
+	--interactive-accent: #705dff;
+	--interactive-accent-hover: #8d7dff;
+	--shadow-l2: 0 8px 24px rgba(0, 0, 0, 0.13);
+	--shadow-l3: 0 24px 64px rgba(0, 0, 0, 0.25);
+}
+
+html, body {
+	margin: 0;
+	padding: 0;
+	height: 100%;
+	font-family: var(--font-interface);
+	font-size: 15px;
+	line-height: 1.5;
+	color: var(--text-normal);
+	background: var(--background-primary);
+	-webkit-font-smoothing: antialiased;
+}
+
+/* A stand-in for the editor behind the overlay, so contrast is realistic. */
+#sift-preview-backdrop {
+	position: fixed;
+	inset: 0;
+	background: var(--background-primary);
+	opacity: 0.35;
+}
+
+/* Obsidian's own modal chrome, reduced to what actually positions the modal. */
+.modal-container {
+	position: fixed;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	z-index: 20;
+}
+.modal-container.mod-dim::before {
+	content: "";
+	position: absolute;
+	inset: 0;
+	background: var(--background-modifier-cover);
+}
+.modal {
+	position: relative;
+	background: var(--modal-background);
+	border-radius: var(--radius-l);
+	max-height: 85vh;
+	overflow: hidden;
+}
+.modal-close-button { display: none; }
+.modal-title:empty { display: none; }
+.modal-content { margin: 0; padding: 0; }
+
+/* Obsidian resets bare inputs; the preview needs the same starting point. */
+input, textarea, select, button {
+	font-family: inherit;
+	font-size: inherit;
+	color: var(--text-normal);
+}
+
+#sift-preview-bar {
+	position: fixed;
+	left: 12px;
+	bottom: 12px;
+	z-index: 100;
+	display: flex;
+	gap: 10px;
+	align-items: center;
+	font-size: 12px;
+	color: var(--text-faint);
+	background: var(--background-secondary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	padding: 6px 10px;
+}
+#sift-preview-bar button {
+	font-size: 12px;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 4px;
+	padding: 3px 8px;
+	cursor: pointer;
+}
+</style>
+<link rel="stylesheet" href="styles.css">
+</head>
+<body class="theme-dark">
+<div id="sift-preview-backdrop"></div>
+<div id="sift-preview-bar">
+	<button id="sift-preview-theme" type="button">Toggle theme</button>
+	<span id="sift-preview-status">loading…</span>
+</div>
+<script>
+document.getElementById('sift-preview-theme').addEventListener('click', () => {
+	document.body.classList.toggle('theme-dark');
+	document.body.classList.toggle('theme-light');
+});
+window.siftPreviewErrors = [];
+window.addEventListener('error', (e) => { window.siftPreviewErrors.push(String(e.message)); });
+window.addEventListener('unhandledrejection', (e) => { window.siftPreviewErrors.push('unhandled: ' + String(e.reason)); });
+</script>
+<script src="preview.js"></script>
+</body>
+</html>

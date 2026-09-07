@@ -1,0 +1,31 @@
+# Build output
+main.js
+*.js.map
+
+# Dependencies
+node_modules/
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Test artefacts
+test/fixtures/vault/
+coverage/
+bench-results.json
+bench-ci.json
+
+# Local secrets and environment (must never reach the repo)
+.env
+.env.*
+
+# Obsidian plugin data (never belongs in the repo)
+data.json
+
+# Preview harness bundle (dev/preview)
+dev/preview/preview.js
+
+# Local notes, never published
+CLAUDE.local.md

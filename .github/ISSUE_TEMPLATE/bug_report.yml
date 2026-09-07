@@ -1,0 +1,129 @@
+name: Bug report
+description: Report something in Sift that behaves differently than described in the README.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report this.
+
+        **Please do not paste the content of your notes, note titles, folder names or a real search term.**
+        Sift never sends anything anywhere, and an issue tracker is public — so describe the *shape*
+        of the problem instead. "A two-word query where the second word contains an umlaut" is enough
+        to reproduce almost every report. Where you need an example, invent one: `foo`, `bar`,
+        `Foomaschine`.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did Sift do, and what did you expect instead?
+      placeholder: |
+        I searched for a term with an umlaut and got no results, although a note contains it.
+        I expected the note to appear.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Numbered steps, using invented example terms rather than your own.
+        Describing the query pattern is more useful than the exact words.
+      placeholder: |
+        1. Open the search overlay.
+        2. Type a query of the shape `foo -bar`.
+        3. Switch the sort order to "Modified, newest first".
+        4. The result list stays empty.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part of the plugin
+      options:
+        - Search results (wrong, missing or unexpected hits)
+        - Search syntax (quotes, minus, OR, path:/tag:/title:)
+        - Filters (folder, subfolders, date range)
+        - Sorting or the relevance value
+        - Excerpts and highlighting
+        - Opening a note or jumping to the hit
+        - Keyboard, focus or the overlay itself
+        - Indexing (progress, rebuild, stale results)
+        - Settings tab
+        - Interface language or a wrong translation
+        - Something else
+    validations:
+      required: true
+
+  - type: input
+    id: plugin-version
+    attributes:
+      label: Sift version
+      description: Settings → Community plugins → Installed plugins.
+      placeholder: 1.0.0
+    validations:
+      required: true
+
+  - type: input
+    id: app-version
+    attributes:
+      label: Obsidian version
+      description: Help → About, or Settings → About.
+      placeholder: 1.8.7
+    validations:
+      required: true
+
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Platform
+      options:
+        - Windows
+        - macOS
+        - Linux
+        - iOS or iPadOS
+        - Android
+    validations:
+      required: true
+
+  - type: dropdown
+    id: vault-size
+    attributes:
+      label: Roughly how many notes are in the vault
+      description: A rough magnitude helps with performance and indexing reports. No names, no paths.
+      options:
+        - Under 500
+        - 500 to 2000
+        - 2000 to 10000
+        - More than 10000
+        - I would rather not say
+    validations:
+      required: false
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console output
+      description: >-
+        Optional. Open the developer console (Ctrl+Shift+I, on macOS Cmd+Option+I) and copy any red
+        error that appears while the problem happens. Remove note titles and paths before pasting.
+      render: text
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: hygiene
+    attributes:
+      label: Before submitting
+      options:
+        - label: This report contains no content, titles or paths from my notes.
+          required: true
+        - label: I tried the same thing again with all other community plugins disabled.
+          required: false
+        - label: I rebuilt the index once (Settings → Sift → Rebuild index) and the problem remained.
+          required: false

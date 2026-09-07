@@ -1,0 +1,704 @@
+/*
+Sift styles.
+
+Rules, enforced by test/ui/styles.test.ts:
+  - every selector carries the `sift-` prefix;
+  - every colour is an Obsidian CSS variable, never a literal — the only
+    literals allowed are `transparent` and `currentColor`;
+  - `!important` appears only where an Obsidian modal default has to be beaten,
+    and each occurrence names the default it overrides.
+
+Geometry comes from docs/mockup-dark.html (measured in
+scratchpad/spec/ui-spec.json). Two deliberate deviations from the mockup are
+noted at the rules that carry them: the modal height follows docs/plan.md
+(80vh, not the mockup's 92vh), and the unselected card border is transparent
+rather than the light mockup's visible edge, so both themes agree.
+*/
+
+/* ========================================================================== */
+/* 1. Modal shell                                                             */
+/* ========================================================================== */
+
+.sift-modal {
+	/* plan §3.1: min(70vw, 1100px) wide, 80vh tall. The mockup's 92vh is the
+	   mockup's own framing and is not followed here. */
+	width: min(70vw, 1100px);
+	max-width: min(70vw, 1100px);
+	height: 80vh;
+	max-height: 80vh;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-l, 12px);
+	background-color: var(--modal-background, var(--background-primary));
+	box-shadow: var(--shadow-l3);
+	overflow: hidden;
+	box-sizing: border-box;
+}
+
+.sift-modal * {
+	box-sizing: border-box;
+}
+
+/* Obsidian's .modal-content sets its own margin, padding and overflow; all
+   three have to go for the flex column to fill the panel. */
+.sift-modal .modal-content,
+.sift-modal .sift-modal__content {
+	margin: 0;
+	padding: 0;
+	display: flex;
+	flex-direction: column;
+	height: 100%;
+	min-height: 0;
+	line-height: 1.5;
+	color: var(--text-normal);
+	font-family: var(--font-interface);
+	font-size: 15px;
+	overflow: hidden;
+}
+
+/* The header carries the whole layout; the mockup has no close button. */
+.sift-modal .modal-close-button {
+	display: none;
+}
+
+.sift-modal .modal-title {
+	display: none;
+}
+
+/* ========================================================================== */
+/* 2. Header and search field                                                 */
+/* ========================================================================== */
+
+.sift-header {
+	display: flex;
+	align-items: center;
+	gap: 14px;
+	padding: 18px 24px 14px 24px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	flex-shrink: 0;
+}
+
+.sift-icon {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	color: var(--text-muted);
+}
+
+.sift-icon--search {
+	--icon-size: 22px;
+	width: 22px;
+	height: 22px;
+}
+
+/* Obsidian styles bare inputs; every one of these resets is needed, on :focus
+   too, or the field grows a border inside the header row. */
+.sift-input,
+.sift-input:focus,
+.sift-input:hover,
+.sift-input:active {
+	flex-grow: 1;
+	min-width: 0;
+	height: 33px;
+	padding: 0;
+	border: none;
+	outline: none;
+	box-shadow: none;
+	background-color: transparent;
+	font-family: inherit;
+	font-size: 22px;
+	font-weight: 500;
+	line-height: 1.5;
+	color: var(--text-normal);
+}
+
+.sift-input::placeholder {
+	color: var(--text-faint);
+}
+
+.sift-count {
+	flex: 0 0 auto;
+	font-size: 13px;
+	line-height: 1.5;
+	white-space: nowrap;
+	color: var(--text-faint);
+}
+
+/* ========================================================================== */
+/* 3. Filter bar                                                              */
+/* ========================================================================== */
+
+.sift-filters {
+	display: flex;
+	align-items: center;
+	flex-wrap: wrap;
+	gap: 10px;
+	row-gap: 10px;
+	padding: 12px 24px;
+	border-bottom: 1px solid var(--background-modifier-border);
+	font-size: 13px;
+	flex-shrink: 0;
+}
+
+.sift-filters__spacer {
+	flex-grow: 1;
+}
+
+/* Announces the hit count to assistive tech; the visible counter is in the
+   header, so this stays out of the layout. */
+.sift-filters__status {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+	border: 0;
+}
+
+/* The mockup only ever draws a chip that HAS a value: background, border,
+   --text-normal. Drawn strictly to that spec, an empty chip is bare text — in a
+   real vault "All folders" and "Created" then read as labels, not as controls,
+   which is what a browser pass through the plugin showed. The resting state
+   therefore keeps the outline and drops only the fill, so the chip is visibly a
+   chip while the filled state stays exactly as the mockup has it. */
+.sift-chip {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-chip--active {
+	background-color: var(--background-secondary);
+	border-color: var(--background-modifier-border);
+	color: var(--text-normal);
+}
+
+.sift-chip:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+/* The folder chip's own input carries the focus; the chip has to show it. */
+.sift-chip:focus-within,
+.sift-chip:focus-visible {
+	border-color: var(--background-modifier-border-focus);
+}
+
+.sift-chip__icon {
+	--icon-size: 15px;
+	display: flex;
+	align-items: center;
+	flex: 0 0 auto;
+	color: var(--text-muted);
+}
+
+.sift-chip__label {
+	white-space: nowrap;
+}
+
+.sift-chip__input,
+.sift-chip__input:focus,
+.sift-chip__input:hover {
+	width: 14ch;
+	min-width: 8ch;
+	height: 19.5px;
+	padding: 0;
+	border: none;
+	outline: none;
+	box-shadow: none;
+	background-color: transparent;
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-normal);
+}
+
+.sift-chip__input::placeholder {
+	color: var(--text-muted);
+}
+
+.sift-chip__remove {
+	display: none;
+	padding: 0;
+	border: none;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-faint);
+	cursor: pointer;
+}
+
+.sift-chip__remove--visible {
+	display: inline-flex;
+}
+
+.sift-chip__remove:hover {
+	color: var(--text-normal);
+	background-color: transparent;
+}
+
+/* --- toggles -------------------------------------------------------------- */
+
+.sift-toggle {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	border: none;
+	background-color: transparent;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-toggle--on {
+	color: var(--text-normal);
+}
+
+.sift-toggle__input {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	margin: -1px;
+	padding: 0;
+	overflow: hidden;
+	clip-path: inset(50%);
+	border: 0;
+}
+
+.sift-toggle__track {
+	position: relative;
+	flex: 0 0 auto;
+	width: 30px;
+	height: 17px;
+	border-radius: 9px;
+	background-color: var(--background-modifier-border);
+}
+
+.sift-toggle__thumb {
+	position: absolute;
+	top: 2px;
+	left: 2px;
+	width: 13px;
+	height: 13px;
+	border-radius: 50%;
+	background-color: var(--toggle-thumb-color, var(--text-on-accent));
+	transition: left 120ms ease-out;
+}
+
+.sift-toggle--on .sift-toggle__track {
+	background-color: var(--interactive-accent);
+}
+
+.sift-toggle--on .sift-toggle__thumb {
+	left: 15px;
+}
+
+.sift-toggle__input:focus-visible ~ .sift-toggle__track {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
+}
+
+/* --- created-date chip ---------------------------------------------------- */
+
+.sift-filters__date {
+	position: relative;
+	display: flex;
+	align-items: center;
+}
+
+.sift-chip__remove--date {
+	margin-left: -6px;
+}
+
+.sift-date-menu {
+	display: none;
+	position: absolute;
+	top: calc(100% + 6px);
+	left: 0;
+	z-index: 2;
+	flex-direction: column;
+	min-width: 160px;
+	padding: 4px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background-color: var(--background-secondary);
+	box-shadow: var(--shadow-l2);
+}
+
+.sift-filters__date--open .sift-date-menu {
+	display: flex;
+}
+
+.sift-date-menu__item {
+	padding: 6px 10px;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 13px;
+	text-align: left;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.sift-date-menu__item:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+/* --- sort ----------------------------------------------------------------- */
+
+/* Same reasoning as .sift-chip: the mockup's borderless sort label does not read
+   as a dropdown once it sits in a real theme, so it gets the chip outline too —
+   which also lines its height up with the chips beside it (33.5px). */
+.sift-sort {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	padding: 6px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	color: var(--text-muted);
+}
+
+.sift-sort:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.sift-sort:focus-within {
+	border-color: var(--background-modifier-border-focus);
+}
+
+.sift-sort__icon {
+	--icon-size: 15px;
+	display: flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.sift-sort__chevron {
+	--icon-size: 12px;
+	display: flex;
+	align-items: center;
+	color: var(--text-muted);
+}
+
+.sift-sort__select,
+.sift-sort__select:focus,
+.sift-sort__select:hover {
+	height: 19.5px;
+	padding: 0;
+	border: none;
+	outline: none;
+	box-shadow: none;
+	background-color: transparent;
+	background-image: none;
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-muted);
+	cursor: pointer;
+	appearance: none;
+}
+
+/* ========================================================================== */
+/* 4. Results list                                                            */
+/* ========================================================================== */
+
+.sift-results {
+	position: relative;
+	flex-grow: 1;
+	min-height: 0;
+	overflow-y: auto;
+	overflow-x: hidden;
+	padding: 14px 24px;
+}
+
+.sift-results__spacer {
+	width: 100%;
+}
+
+.sift-results__list {
+	display: flex;
+	flex-direction: column;
+	gap: 18px;
+}
+
+.sift-results__list--hidden {
+	display: none;
+}
+
+/* --- card ----------------------------------------------------------------- */
+
+.sift-card {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	padding: 12px 18px;
+	/* The 1px is always present so selecting a card does not shift the layout.
+	   Transparent rather than a visible edge: the dark and light mockups
+	   disagree and no single variable reproduces both. */
+	border: 1px solid transparent;
+	border-radius: var(--radius-m, 8px);
+	background-color: var(--background-secondary);
+	cursor: pointer;
+	transform-origin: center;
+	transition: transform 120ms ease-out;
+}
+
+.sift-card:hover {
+	border-color: var(--background-modifier-border);
+}
+
+.sift-card--selected {
+	position: relative;
+	z-index: 1;
+	border-color: var(--interactive-accent);
+	box-shadow: var(--shadow-l2);
+}
+
+.sift-card--zoomed {
+	transform: scale(1.02);
+	will-change: transform;
+}
+
+.sift-card__head {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
+}
+
+.sift-card__title {
+	flex-grow: 1;
+	min-width: 0;
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+	font-size: 16px;
+	font-weight: 600;
+	line-height: 1.5;
+	color: var(--text-normal);
+}
+
+.sift-card__similar {
+	display: none;
+	flex: 0 0 auto;
+	font-size: 12px;
+	color: var(--text-muted);
+}
+
+.sift-card__similar--visible {
+	display: block;
+}
+
+.sift-card__date {
+	flex: 0 0 auto;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-muted);
+}
+
+.sift-card__path {
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--text-faint);
+	overflow: hidden;
+	white-space: nowrap;
+	text-overflow: ellipsis;
+}
+
+/* Reserves one snippet line so a card does not change height when the snippets
+   arrive after the first paint. */
+.sift-card__snippets {
+	display: flex;
+	flex-direction: column;
+	gap: 5px;
+	min-height: 21px;
+}
+
+.sift-card__snippet {
+	margin-top: 0;
+	font-size: 14px;
+	line-height: 1.5;
+	color: var(--text-faint);
+	overflow-wrap: anywhere;
+}
+
+.sift-card__snippet:first-child {
+	margin-top: 4px;
+}
+
+.sift-snippet__sentence {
+	color: var(--text-normal);
+}
+
+.sift-mark {
+	border-radius: 2px;
+	padding: 0 1px;
+	background-color: var(--text-highlight-bg);
+	/* Obsidian's own <mark> rule sets a colour; inherit puts the mark back on
+	   the sentence colour it sits in. */
+	color: inherit;
+}
+
+/* ========================================================================== */
+/* 5. Empty states                                                            */
+/* ========================================================================== */
+
+.sift-empty {
+	display: none;
+	flex-direction: column;
+	gap: 8px;
+	padding: 48px 8px;
+	text-align: center;
+}
+
+.sift-empty--visible {
+	display: flex;
+}
+
+.sift-empty__title {
+	font-size: 16px;
+	font-weight: 600;
+	color: var(--text-normal);
+}
+
+.sift-empty__body {
+	font-size: 14px;
+	color: var(--text-muted);
+}
+
+.sift-empty__hint {
+	font-size: 13px;
+	color: var(--text-faint);
+}
+
+.sift-empty__errors {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	margin-top: 8px;
+}
+
+.sift-empty__error {
+	font-size: 13px;
+	color: var(--text-muted);
+}
+
+/* ========================================================================== */
+/* 6. Footer                                                                  */
+/* ========================================================================== */
+
+.sift-footer {
+	display: flex;
+	align-items: center;
+	gap: 18px;
+	flex-shrink: 0;
+	padding: 10px 24px;
+	border-top: 1px solid var(--background-modifier-border);
+	background-color: var(--background-primary);
+	font-size: 12px;
+	line-height: 1.5;
+	color: var(--text-faint);
+}
+
+.sift-footer__hint {
+	white-space: nowrap;
+}
+
+/* Obsidian styles <kbd>; the mockup's key glyph is plain text one shade up. */
+.sift-key {
+	padding: 0;
+	border: none;
+	border-radius: 0;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: inherit;
+	line-height: inherit;
+	color: var(--text-muted);
+}
+
+/* ========================================================================== */
+/* 7. Opened-note flash                                                       */
+/* ========================================================================== */
+
+.sift-flash {
+	animation: sift-flash-fade 1400ms ease-out;
+}
+
+@keyframes sift-flash-fade {
+	from {
+		background-color: var(--text-highlight-bg);
+	}
+	to {
+		background-color: transparent;
+	}
+}
+
+/* ========================================================================== */
+/* 8. Narrow viewports                                                        */
+/* ========================================================================== */
+
+@media (max-width: 800px) {
+	.sift-modal {
+		width: 100vw;
+		max-width: 100vw;
+		height: 100vh;
+		max-height: 100vh;
+		border-radius: 0;
+	}
+
+	.sift-header {
+		padding: 14px 16px 12px 16px;
+	}
+
+	.sift-filters {
+		padding: 10px 16px;
+	}
+
+	.sift-results {
+		padding: 12px 16px;
+	}
+
+	.sift-footer {
+		padding: 8px 16px;
+	}
+}
+
+/* ========================================================================== */
+/* 9. Reduced motion                                                          */
+/* ========================================================================== */
+
+/* The transition goes, the scale stays: the selection must remain visible
+   without motion. */
+@media (prefers-reduced-motion: reduce) {
+	.sift-card {
+		transition: none;
+	}
+
+	.sift-toggle__thumb {
+		transition: none;
+	}
+
+	.sift-flash {
+		animation: none;
+	}
+}
