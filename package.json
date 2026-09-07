@@ -1,6 +1,6 @@
 {
   "name": "sift",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
   "main": "main.js",
   "private": true,
@@ -17,7 +17,7 @@
     "guard": "node scripts/scope-guard.mjs",
     "guard:release": "node scripts/scope-guard.mjs --release",
     "preview": "node dev/preview/build.mjs && node dev/preview/serve.mjs",
-    "check": "npm run guard:release && npm run typecheck && npm run lint && npm test",
+    "check": "npm run build && npm run guard:release && npm run lint && npm test",
     "version": "node version-bump.mjs && git add manifest.json versions.json"
   },
   "keywords": [],

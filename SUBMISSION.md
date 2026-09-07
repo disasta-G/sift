@@ -1,13 +1,67 @@
 # Before submission
 
-A maintainer checklist. It is deliberately not part of README.md, which is the
+A maintainer checklist. It is deliberately not part of `README.md`, which is the
 page every user of the plugin reads.
 
-Everything above describes the plugin as it stands. This last section is a maintainer checklist and not part of the description: it lists what still has to happen before Sift is offered to the community directory.
+## What still has to happen
 
-- **Record the screenshots.** None exist in the repository yet. Five images go under `docs/`, and a Screenshots section linking them belongs directly under the introduction:
-  - `docs/screenshot-overlay-dark.png` — the search overlay in a dark theme, query typed, several result cards with highlighted excerpts visible.
-  - `docs/screenshot-overlay-light.png` — the same overlay in a light theme, to show that no colour is hardcoded.
-  - `docs/screenshot-filters.png` — the filter bar expanded: folder picker, "Include subfolders", the created-date range and the sort dropdown.
-  - `docs/screenshot-settings.png` — the settings tab, including the index statistics line and the "Rebuild index" button.
-  - `docs/screenshot-indexing.png` — the empty state shown while the index is still being built.
+- **Record the screenshots.** None exist in the repository yet. Five images go
+  under `docs/`, and a Screenshots section linking them belongs directly under
+  the introduction in `README.md`:
+  - `docs/screenshot-overlay-dark.png` — the search overlay in a dark theme,
+    query typed, several result cards with highlighted excerpts visible.
+  - `docs/screenshot-overlay-light.png` — the same overlay in a light theme, to
+    show that no colour is hardcoded.
+  - `docs/screenshot-filters.png` — the filter bar with the created-date
+    popover open: quick picks, calendar, folder picker and sort.
+  - `docs/screenshot-settings.png` — the settings tab, including the index
+    statistics line and the "Rebuild index" button.
+  - `docs/screenshot-indexing.png` — the empty state shown while the index is
+    still being built.
+
+- **Create the public repository** `disasta-G/sift` and push the branch together
+  with the `1.0.0` tag. The CI workflow triggers on `main` and on `master`, so
+  either name works.
+
+- **Cut the release.** Tag `1.0.0`, no `v` prefix — the directory matches the
+  tag against `manifest.json` exactly. Attach `main.js`, `manifest.json` and
+  `styles.css` as three individual assets, never a zip.
+
+- **Open the submission pull request** against `obsidianmd/obsidian-releases`.
+  It must change `community-plugins.json` and nothing else, and it must come
+  from the account that owns the plugin repository.
+
+## The release gate
+
+Run before tagging. Every one of these has to be green.
+
+```
+npm run check     # build, release guard, lint, tests
+npm run bench     # 10 000 notes; all six budgets must pass
+```
+
+`npm run check` builds first on purpose: the release guard reads `main.js`, so
+the bundle has to be the one the current sources produce.
+
+## The directory entry
+
+Append this as the **last** element of `community-plugins.json`. The five
+fields are the only ones allowed, and `id`, `name` and `description` have to
+match `manifest.json` character for character.
+
+```json
+{
+	"id": "sift",
+	"name": "Sift",
+	"description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
+	"author": "Dario Giovanoli",
+	"repo": "disasta-G/sift"
+}
+```
+
+## After submission
+
+The directory reviews the whole repository, not the release, and the review
+takes weeks. `npm run guard` is what keeps anything belonging to a later
+release out of this branch in the meantime; it runs in `npm run check` and in
+CI, and it reads the working tree, the built bundle and the git history.

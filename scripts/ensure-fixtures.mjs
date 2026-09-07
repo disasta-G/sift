@@ -31,9 +31,20 @@ if (existsSync(manifest)) {
 }
 
 console.log("Fixture vault missing — generating 2000 notes (once).");
+
+// Run tsx's own entry point with this Node, rather than shelling out to npx.
+// Node 22 refuses to spawn a .cmd without `shell: true`, so the obvious
+// `spawnSync("npx.cmd", …)` fails on Windows with no useful message — and a
+// shell would drag quoting rules in for nothing.
+const tsxCli = join(repo, "node_modules", "tsx", "dist", "cli.mjs");
+if (!existsSync(tsxCli)) {
+	console.error("tsx is not installed. Run `npm ci`, then `npm run fixtures`.");
+	process.exit(1);
+}
+
 const result = spawnSync(
-	process.platform === "win32" ? "npx.cmd" : "npx",
-	["tsx", "test/fixtures/generate.ts", "--count", "2000"],
+	process.execPath,
+	[tsxCli, join("test", "fixtures", "generate.ts"), "--count", "2000"],
 	{ cwd: repo, stdio: "inherit" },
 );
 

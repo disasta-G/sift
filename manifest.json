@@ -1,7 +1,7 @@
 {
 	"id": "sift",
 	"name": "Sift",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"minAppVersion": "1.8.7",
 	"description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
 	"author": "Dario Giovanoli",
