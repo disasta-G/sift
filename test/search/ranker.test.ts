@@ -738,6 +738,103 @@ describe('sort', () => {
 });
 
 /* -------------------------------------------------------------------------- */
+/* A result set with no terms                                                 */
+/* -------------------------------------------------------------------------- */
+
+const NO_TERMS = makeAst(0);
+
+/** What a filter-only search hands the Ranker: hits with an empty match list. */
+function filterHit(spec: { path: string; createdAt: number; modifiedAt?: number }): RawHit {
+	return makeHit({
+		path: spec.path,
+		matches: [],
+		createdAt: spec.createdAt,
+		modifiedAt: spec.modifiedAt ?? spec.createdAt,
+	});
+}
+
+describe('a query with no terms', () => {
+	it('resolves the relevance key to created-desc and leaves every other key alone', () => {
+		expect(Ranker.effectiveSort('relevance', NO_TERMS)).toBe('created-desc');
+		expect(Ranker.effectiveSort('relevance', ONE_TERM)).toBe('relevance');
+		for (const key of SORT_KEYS) {
+			if (key === 'relevance') continue;
+			expect(Ranker.effectiveSort(key, NO_TERMS)).toBe(key);
+			expect(Ranker.effectiveSort(key, TWO_TERMS)).toBe(key);
+		}
+	});
+
+	it('orders by created descending, newest first', () => {
+		const hits = [
+			filterHit({ path: 'a/Alt.md', createdAt: NOW - 30 * DAY }),
+			filterHit({ path: 'b/Neu.md', createdAt: NOW - 1 * DAY }),
+			filterHit({ path: 'c/Mitte.md', createdAt: NOW - 10 * DAY }),
+		];
+
+		const ranked = ranker().rank(hits, NO_TERMS, NOW);
+
+		expect(ranked.map((hit) => hit.path)).toEqual(['b/Neu.md', 'c/Mitte.md', 'a/Alt.md']);
+	});
+
+	it('breaks a tie on the creation date by path, so the order never wobbles', () => {
+		const hits = [
+			filterHit({ path: 'b/Zweite.md', createdAt: NOW - 5 * DAY }),
+			filterHit({ path: 'a/Erste.md', createdAt: NOW - 5 * DAY }),
+		];
+
+		expect(ranker().rank(hits, NO_TERMS, NOW).map((hit) => hit.path)).toEqual(['a/Erste.md', 'b/Zweite.md']);
+	});
+
+	it('reports no relevance at all instead of a fake 100 for everything', () => {
+		const hits = [
+			filterHit({ path: 'a/Eins.md', createdAt: NOW - 2 * DAY }),
+			filterHit({ path: 'b/Zwei.md', createdAt: NOW - 3 * DAY, modifiedAt: NOW }),
+		];
+
+		const ranked = ranker().rank(hits, NO_TERMS, NOW);
+
+		for (const hit of ranked) {
+			expect(hit.score).toBe(0);
+			expect(hit.relevance).toBe(0);
+		}
+	});
+
+	it('does not let the recency bonus creep into a term-less score', () => {
+		// Every hit stays at 0: a note modified today must not outrank one
+		// modified last year when nothing was searched for.
+		const fresh = filterHit({ path: 'a/Frisch.md', createdAt: NOW - 2 * DAY, modifiedAt: NOW });
+		const stale = filterHit({ path: 'b/Alt.md', createdAt: NOW - 1 * DAY, modifiedAt: NOW - 400 * DAY });
+
+		const ranked = ranker().rank([fresh, stale], NO_TERMS, NOW);
+
+		expect(ranked.map((hit) => hit.score)).toEqual([0, 0]);
+		// created-desc decides, not freshness.
+		expect(ranked.map((hit) => hit.path)).toEqual(['b/Alt.md', 'a/Frisch.md']);
+	});
+
+	it('still obeys a sort key the user picked', () => {
+		const hits = [
+			filterHit({ path: 'a/Alt.md', createdAt: NOW - 30 * DAY, modifiedAt: NOW - 1 * DAY }),
+			filterHit({ path: 'b/Neu.md', createdAt: NOW - 1 * DAY, modifiedAt: NOW - 30 * DAY }),
+		];
+
+		// What the modal does: rank, then re-sort for any key but 'relevance'.
+		const ranked = ranker().rank(hits, NO_TERMS, NOW);
+		expect(Ranker.sort(ranked, 'modified-desc').map((hit) => hit.path)).toEqual(['a/Alt.md', 'b/Neu.md']);
+		expect(Ranker.sort(ranked, 'title-asc').map((hit) => hit.title)).toEqual(['Alt', 'Neu']);
+	});
+
+	it('scores a hit that does carry matches the usual way, so only the term-less case changes', () => {
+		const hits = [makeHit({ path: 'a.md', matches: [makeMatch({ field: 'title' })] })];
+
+		const ranked = ranker().rank(hits, ONE_TERM, NOW);
+
+		expect(ranked[0].score).toBeGreaterThan(0);
+		expect(ranked[0].relevance).toBe(100);
+	});
+});
+
+/* -------------------------------------------------------------------------- */
 /* Snapshot                                                                   */
 /* -------------------------------------------------------------------------- */
 

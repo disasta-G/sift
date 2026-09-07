@@ -11,6 +11,11 @@
  * frontmatter date where there is one" only means something over notes that
  * write that date in four different notations and sometimes not at all.
  *
+ * The last section covers the search that has NO query term: a date range or a
+ * folder on its own is a valid search and returns everything the filters let
+ * through, while an empty query with no filter — and a query of nothing but
+ * negations — still returns nothing.
+ *
  * Node APIs are fine here: this file is test infrastructure and never ships.
  */
 
@@ -21,7 +26,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { Indexer } from '../../src/index/Indexer';
 import { Store } from '../../src/index/Store';
 import { parseQuery } from '../../src/search/QueryParser';
-import { Searcher } from '../../src/search/Searcher';
+import { hasActiveFilters, Searcher } from '../../src/search/Searcher';
 import { DEFAULT_SETTINGS, DEFAULT_TUNING } from '../../src/settings';
 import type { Millis, RawHit, SearchFilters, SearchOptions } from '../../src/types';
 import { createFakeApp, type FakeFileSpec } from '../helpers/fakeVault';
@@ -363,5 +368,189 @@ describe('Searcher.passesFilters', () => {
 		expect(small.searcher.passesFilters(alpha, filtersWith({ createdFrom: BASE, createdTo: BASE }))).toBe(true);
 		expect(small.searcher.passesFilters(alpha, filtersWith({ createdFrom: BASE + 1 }))).toBe(false);
 		expect(small.searcher.passesFilters(alpha, filtersWith({ modifiedTo: BASE }))).toBe(false);
+	});
+});
+
+/* ========================================================================== */
+/* A search with no query term                                                */
+/* ========================================================================== */
+
+describe('hasActiveFilters', () => {
+	it('is false for filters that constrain nothing', () => {
+		expect(hasActiveFilters(filtersWith())).toBe(false);
+		expect(hasActiveFilters(filtersWith({ includeSubfolders: false }))).toBe(false);
+	});
+
+	it('is true for a date bound at either end of either field', () => {
+		expect(hasActiveFilters(filtersWith({ createdFrom: BASE }))).toBe(true);
+		expect(hasActiveFilters(filtersWith({ createdTo: BASE }))).toBe(true);
+		expect(hasActiveFilters(filtersWith({ modifiedFrom: BASE }))).toBe(true);
+		expect(hasActiveFilters(filtersWith({ modifiedTo: BASE }))).toBe(true);
+	});
+
+	it('is true for a folder, slashes and all', () => {
+		expect(hasActiveFilters(filtersWith({ folder: 'Projekte' }))).toBe(true);
+		expect(hasActiveFilters(filtersWith({ folder: '/Projekte/' }))).toBe(true);
+	});
+
+	it('treats the vault root as a filter only when subfolders are off', () => {
+		for (const root of ['', '/']) {
+			expect(hasActiveFilters(filtersWith({ folder: root }))).toBe(false);
+			expect(hasActiveFilters(filtersWith({ folder: root, includeSubfolders: false }))).toBe(true);
+		}
+	});
+
+	it('does not count the excluded folders from the settings', () => {
+		// Otherwise an empty query would list the whole vault for anyone who has
+		// ever excluded a folder.
+		expect(hasActiveFilters(filtersWith({ excludedFolders: ['Archiv'] }))).toBe(false);
+	});
+});
+
+describe('Searcher — search without a query term', () => {
+	it('returns nothing at all when no filter is set', () => {
+		for (const query of ['', '   ', '""']) {
+			expect(run(small.searcher, query, filtersWith())).toEqual([]);
+		}
+	});
+
+	it('returns nothing for negations alone, however they are written', () => {
+		// "Every note except those" is not a question anyone types on purpose.
+		expect(run(small.searcher, '-kaffee', filtersWith())).toEqual([]);
+		expect(run(small.searcher, '-kaffee -alpha', filtersWith())).toEqual([]);
+		expect(run(small.searcher, '-path:Projekte', filtersWith())).toEqual([]);
+	});
+
+	it('returns exactly the notes created inside a date range, both ends included', () => {
+		const filters = filtersWith({ createdFrom: BASE + DAY, createdTo: BASE + 3 * DAY });
+		expect(paths(run(small.searcher, '', filters))).toEqual([BETA, GAMMA, DELTA].sort());
+	});
+
+	it('includes a note that sits exactly on either boundary and excludes the neighbours', () => {
+		// BETA is created at BASE + 1 day, DELTA at BASE + 3 days: the range is
+		// precisely those two ends.
+		const closed = filtersWith({ createdFrom: BASE + DAY, createdTo: BASE + 3 * DAY });
+		expect(paths(run(small.searcher, '', closed))).toContain(BETA);
+		expect(paths(run(small.searcher, '', closed))).toContain(DELTA);
+		// One millisecond in from each end drops exactly those two.
+		const open = filtersWith({ createdFrom: BASE + DAY + 1, createdTo: BASE + 3 * DAY - 1 });
+		expect(paths(run(small.searcher, '', open))).toEqual([GAMMA]);
+	});
+
+	it('accepts an open-ended range and a single day', () => {
+		expect(paths(run(small.searcher, '', filtersWith({ createdFrom: BASE + 3 * DAY })))).toEqual(
+			[DELTA, ROOT].sort(),
+		);
+		expect(paths(run(small.searcher, '', filtersWith({ createdTo: BASE })))).toEqual([ALPHA]);
+		const oneDay = filtersWith({ createdFrom: BASE + 2 * DAY, createdTo: BASE + 2 * DAY });
+		expect(paths(run(small.searcher, '', oneDay))).toEqual([GAMMA]);
+	});
+
+	it('works on the modified range as well', () => {
+		const filters = filtersWith({ modifiedFrom: BASE + 11 * DAY, modifiedTo: BASE + 13 * DAY });
+		expect(paths(run(small.searcher, '', filters))).toEqual([BETA, GAMMA, DELTA].sort());
+	});
+
+	it('returns exactly one folder subtree, and only its direct children without subfolders', () => {
+		expect(paths(run(small.searcher, '', filtersWith({ folder: 'Projekte' })))).toEqual([ALPHA, BETA].sort());
+		const direct = filtersWith({ folder: 'Projekte', includeSubfolders: false });
+		expect(paths(run(small.searcher, '', direct))).toEqual([ALPHA]);
+		expect(paths(run(small.searcher, '', filtersWith({ folder: 'Projekte/2024' })))).toEqual([BETA]);
+	});
+
+	it('does not let a name-prefix sibling bleed into the folder', () => {
+		expect(paths(run(small.searcher, '', filtersWith({ folder: 'Projekte' })))).not.toContain(GAMMA);
+		expect(paths(run(small.searcher, '', filtersWith({ folder: 'Projekte2' })))).toEqual([GAMMA]);
+	});
+
+	it('lists the loose root notes when the root is chosen without subfolders', () => {
+		expect(paths(run(small.searcher, '', filtersWith({ folder: '', includeSubfolders: false })))).toEqual([ROOT]);
+	});
+
+	it('combines a folder with a date range', () => {
+		const filters = filtersWith({ folder: 'Projekte', createdFrom: BASE + DAY });
+		expect(paths(run(small.searcher, '', filters))).toEqual([BETA]);
+	});
+
+	it('lets the excluded folders win', () => {
+		const wide = filtersWith({ createdFrom: BASE, createdTo: BASE + 10 * DAY, excludedFolders: ['Archiv'] });
+		expect(paths(run(small.searcher, '', wide))).not.toContain(DELTA);
+		expect(paths(run(small.searcher, '', wide))).toEqual([ALPHA, BETA, GAMMA, ROOT].sort());
+		const pointed = filtersWith({ folder: 'Archiv', excludedFolders: ['Archiv'] });
+		expect(run(small.searcher, '', pointed)).toEqual([]);
+	});
+
+	it('applies a negation beside the filter', () => {
+		// "That folder, without the Alpha note."
+		const filters = filtersWith({ folder: 'Projekte' });
+		expect(paths(run(small.searcher, '-alpha', filters))).toEqual([BETA]);
+		expect(paths(run(small.searcher, '-kaffee', filters))).toEqual([]);
+	});
+
+	it('never fuzzy-matches a negation away', () => {
+		// "Alphb" is one edit from "Alpha" and must not remove it.
+		const filters = filtersWith({ folder: 'Projekte' });
+		expect(paths(run(small.searcher, '-alphb', filters, true))).toEqual([ALPHA, BETA].sort());
+	});
+
+	it('carries no matches, no quality damage and the metadata of the record', () => {
+		const hits = run(small.searcher, '', filtersWith({ folder: 'Projekte', includeSubfolders: false }));
+		expect(hits).toHaveLength(1);
+		expect(hits[0].matches).toEqual([]);
+		expect(hits[0].quality).toBe('exact');
+		expect(hits[0].path).toBe(ALPHA);
+		expect(hits[0].title).toBe('Alpha');
+		expect(hits[0].folder).toBe('Projekte');
+		expect(hits[0].createdAt).toBe(BASE);
+		expect(hits[0].modifiedAt).toBe(BASE + 10 * DAY);
+	});
+
+	it('reads no file text when there is nothing to verify', () => {
+		const spy = vi.spyOn(small.searcher, 'verify');
+		run(small.searcher, '', filtersWith({ createdFrom: BASE }));
+		const calls = spy.mock.calls.length;
+		spy.mockRestore();
+		expect(calls).toBe(0);
+	});
+
+	it('does no trigram work either', () => {
+		// The pass is a scan over the file records: there is no literal to look
+		// up, so no posting list is touched. This is what keeps it fast on a
+		// large vault.
+		const spy = vi.spyOn(small.searcher, 'candidates');
+		const hits = run(small.searcher, '', filtersWith({ folder: 'Projekte' }));
+		const calls = spy.mock.calls.length;
+		spy.mockRestore();
+		expect(calls).toBe(0);
+		expect(hits).toHaveLength(2);
+	});
+
+	it('verifies a negation only for the files the filter kept', () => {
+		const spy = vi.spyOn(small.searcher, 'verify');
+		run(small.searcher, '-kaffee', filtersWith({ folder: 'Projekte' }));
+		const scanned = spy.mock.calls.map((call) => call[1].path);
+		spy.mockRestore();
+		expect(scanned.sort()).toEqual([ALPHA, BETA].sort());
+	});
+
+	it('respects an already aborted signal', () => {
+		const controller = new AbortController();
+		controller.abort();
+		const hits = small.searcher.search(
+			parseQuery('', DEFAULT_TUNING),
+			options({ filters: filtersWith({ folder: 'Projekte' }), signal: controller.signal }),
+		);
+		expect(hits).toEqual([]);
+	});
+
+	it('agrees with passesFilters over the generated vault', () => {
+		// The whole point of the term-less pass: it is passesFilters and nothing
+		// else, so the two have to select the same notes at vault scale.
+		const from = Date.UTC(2024, 5, 15, 12);
+		const to = Date.UTC(2025, 1, 20, 12);
+		const filters = filtersWith({ createdFrom: from, createdTo: to });
+		const expected = passing(fixture, filters);
+		expect(expected.length).toBeGreaterThan(10);
+		expect(paths(run(fixture.searcher, '', filters))).toEqual(expected);
 	});
 });

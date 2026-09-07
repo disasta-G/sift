@@ -338,7 +338,19 @@ export interface QueryAst {
 	raw: string;
 	/** Recoverable syntax problems. The parser never throws; it degrades. */
 	errors: readonly QueryParseError[];
-	/** No positive term at all — the caller should show the empty state, not run a search. */
+	/**
+	 * No positive term at all: `terms.length === 0`. `-altbau` is empty by this
+	 * definition, an unclosed quote around real text is not.
+	 *
+	 * It is NOT the same as "do not search". Filters alone are a valid search —
+	 * a date, a date range or a folder is a question in itself — and the parser
+	 * cannot see the filter bar, so it cannot answer that question. The caller
+	 * combines the two:
+	 *
+	 *   `!ast.isEmpty || hasActiveFilters(filters)`   (`src/search/Searcher.ts`)
+	 *
+	 * and only shows the empty state when both are false.
+	 */
 	isEmpty: boolean;
 	/** Flat list of every positive term (`must` plus all `should` members), in the order the Ranker indexes them. */
 	terms: readonly QueryTerm[];
@@ -405,7 +417,15 @@ export interface Match {
 	matchedText?: string;
 }
 
-/** Filters from the filter bar. `null` means "no constraint". */
+/**
+ * Filters from the filter bar. `null` means "no constraint".
+ *
+ * A set filter is a search in its own right: with no query term the Searcher
+ * returns everything that passes these. `hasActiveFilters` in
+ * `src/search/Searcher.ts` says which of the fields below count as "set" —
+ * `excludedFolders` deliberately does not, and neither does the vault root with
+ * subfolders on.
+ */
 export interface SearchFilters {
 	/** Folder restriction, already `normalizePath()`ed. `null` = whole vault. */
 	folder: VaultPath | null;
@@ -419,7 +439,14 @@ export interface SearchFilters {
 	excludedFolders: readonly VaultPath[];
 }
 
-/** Sort order of the result list. */
+/**
+ * Sort order of the result list.
+ *
+ * `relevance` needs a query to be an order at all. Over a term-less search —
+ * filters alone — every hit scores the same, so it falls back to
+ * `created-desc`; `Ranker.effectiveSort` is the one place that decides it and
+ * the one place to change if that is ever revisited.
+ */
 export type SortKey =
 	| 'relevance'
 	| 'created-desc'
@@ -448,17 +475,31 @@ export interface RawHit {
 	folder: VaultPath;
 	createdAt: Millis;
 	modifiedAt: Millis;
-	/** Ordered by `start`, deduplicated, overlaps merged per term. */
+	/**
+	 * Ordered by `start`, deduplicated, overlaps merged per term.
+	 *
+	 * EMPTY for a hit found by filters alone — a date range or a folder with no
+	 * search term matches the whole file, not a position in it. Everything
+	 * downstream has to survive that: Snippets returns no excerpt and reads no
+	 * file, the Ranker scores 0, and the card renders title, path and date.
+	 */
 	matches: readonly Match[];
-	/** Worst quality among `matches` — a hit is only "exact" if every term matched exactly. */
+	/** Worst quality among `matches` — a hit is only "exact" if every term matched exactly. `exact` when there are none. */
 	quality: MatchQuality;
 }
 
 /** Ranker output. */
 export interface RankedHit extends RawHit {
-	/** Raw weighted score, unbounded, comparable only within one result set. */
+	/** Raw weighted score, unbounded, comparable only within one result set. `0` when the query has no terms. */
 	score: number;
-	/** `score` mapped to 0-100, shown as "Passgenauigkeit". */
+	/**
+	 * `score` mapped to 0-100, shown as "Passgenauigkeit".
+	 *
+	 * `0` for every hit of a term-less search, where relevance is not low but
+	 * UNDEFINED: nothing was matched, so nothing distinguishes one hit from
+	 * another. The UI shows no relevance figure in that case rather than a row of
+	 * zeroes — or a row of 100s, which is the lie this field refuses to tell.
+	 */
 	relevance: number;
 }
 

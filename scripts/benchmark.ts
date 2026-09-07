@@ -283,8 +283,8 @@ function withFilters(overrides: Partial<SearchFilters>): SearchFilters {
  * The fixed query set. Every entry is answerable by the generated vault, and
  * between them they cover each retrieval path the Searcher has: trigram
  * intersection, the linear short-term scan, phrase matching, negation, OR
- * groups, field restrictions, the alias/contraction variants and the filter
- * pass.
+ * groups, field restrictions, the alias/contraction variants, the fuzzy typo
+ * path, the filter pass and the term-less search that is nothing but filters.
  */
 function buildQueries(vault: LoadedVault): readonly BenchQuery[] {
 	const range = timeWindow(vault);
@@ -313,6 +313,14 @@ function buildQueries(vault: LoadedVault): readonly BenchQuery[] {
 		{ label: 'sharp s', query: 'straße', filters: NO_FILTERS },
 		{ label: 'alias', query: 'kueche', filters: NO_FILTERS },
 		{ label: 'alias (2)', query: 'strasse', filters: NO_FILTERS },
+		// Two dropped letters, one short word and one long. They are here because
+		// the fuzzy pre-filter used to reject exactly this shape: one edit destroys
+		// up to three trigrams whatever the term's length, so a constant SHARE
+		// threshold threw away the short term before the distance check ever ran
+		// and "Similar" found nothing for a typo. Both are answered on the fuzzy
+		// pass, where the recall is what these two cases exist to keep honest.
+		{ label: 'fuzzy typo (short)', query: 'heizng', filters: NO_FILTERS },
+		{ label: 'fuzzy typo (long)', query: 'kafeemaschine', filters: NO_FILTERS },
 		{ label: 'filter: folder', query: 'heizung', filters: withFilters({ folder: 'Projekte' }) },
 		{
 			label: 'filter: folder, no subfolders',
@@ -329,6 +337,16 @@ function buildQueries(vault: LoadedVault): readonly BenchQuery[] {
 			query: 'kaffee',
 			filters: withFilters({ modifiedFrom: range.from, modifiedTo: range.to }),
 		},
+		// A search with no query term at all: the filters ARE the query. Both
+		// cases return a large share of the vault, so they measure the two things
+		// that path is made of — the scan over the file records and the sort of
+		// everything it returns — without a single trigram lookup.
+		{
+			label: 'no term: date range',
+			query: '',
+			filters: withFilters({ createdFrom: range.from, createdTo: range.to }),
+		},
+		{ label: 'no term: folder', query: '', filters: withFilters({ folder: 'Projekte' }) },
 		// The two orders that cost a second pass over the whole result set. They
 		// are separate cases rather than a flag on an existing one so the table
 		// shows what choosing another order in the dropdown adds to a keystroke.
@@ -932,7 +950,9 @@ function renderQueryTable(summaries: readonly QuerySummary[]): string {
 		['Case', 'Query', 'Hits', 'p50', 'p95'],
 		summaries.map((summary) => [
 			summary.label,
-			summary.query,
+			// A filter-only case has no query string; an empty cell would read as
+			// a formatting fault rather than as the point of the case.
+			summary.query.length === 0 ? '(filters only)' : summary.query,
 			formatCount(summary.hits),
 			formatMs(summary.p50),
 			formatMs(summary.p95),

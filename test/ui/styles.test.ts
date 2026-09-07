@@ -121,6 +121,17 @@ describe('styles.css', () => {
 		expect(BODY).toMatch(/\.sift-date-menu\s*\{[^}]*position:\s*absolute/);
 	});
 
+	it('lets the measured placement move the date popover, and keeps the mockup default as the fallback', () => {
+		// `.sift-modal` clips at overflow: hidden, so a chip near the right edge
+		// used to have the last calendar columns and the clear button cut off. The
+		// placement is measured in JS because it depends on where the chip lands
+		// after the bar has wrapped; CSS only has to consume it — and to fall back
+		// to the mockup's own left-aligned popover when nothing was measured.
+		const rule = BODY.match(/\.sift-date-menu\s*\{([^}]*)\}/)?.[1] ?? '';
+		expect(rule).toContain('left: var(--sift-date-menu-left, 0px)');
+		expect(rule).toContain('max-width: var(--sift-date-menu-max-width, none)');
+	});
+
 	it('keeps the modal geometry the plan asks for', () => {
 		expect(BODY).toMatch(/\.sift-modal\s*\{[\s\S]*?width:\s*min\(70vw, 1100px\)/);
 		expect(BODY).toMatch(/\.sift-modal\s*\{[\s\S]*?height:\s*80vh/);
@@ -140,6 +151,34 @@ describe('styles.css', () => {
 		expect(BODY).toMatch(/\.sift-sort\s*\{[^}]*border:\s*1px solid var\(--background-modifier-border\)/);
 		// The filled state stays exactly as the mockup has it.
 		expect(BODY).toMatch(/\.sift-chip--active\s*\{[^}]*background-color:\s*var\(--background-secondary\)/);
+	});
+
+	it('keeps the curation controls visible rather than hover-only, and marks a kept card without moving it', () => {
+		// A control revealed on hover is reachable by neither the keyboard nor a
+		// screen reader, so the two buttons are always in the layout.
+		const actions = BODY.match(/\.sift-card__actions\s*\{([^}]*)\}/)?.[1] ?? '';
+		expect(actions).toMatch(/display:\s*flex/);
+		expect(BODY).not.toMatch(/\.sift-card:hover\s+\.sift-card__actions/);
+		expect(BODY).toMatch(/\.sift-card__action:focus-visible\s*\{[^}]*outline:/);
+
+		// An inset edge, not a border: the border belongs to the selection, and a
+		// kept card can be the selected one at the same time.
+		expect(BODY).toMatch(/\.sift-card--kept\s*\{[^}]*box-shadow:\s*inset 3px 0 0 0 var\(--interactive-accent\)/);
+		expect(BODY).toMatch(
+			/\.sift-card--selected\.sift-card--kept\s*\{[^}]*box-shadow:\s*var\(--shadow-l2\), inset 3px/,
+		);
+	});
+
+	it('wraps the hints, not the footer, so the curation controls stay on the right', () => {
+		expect(BODY).toMatch(/\.sift-footer__hints\s*\{[^}]*flex-wrap:\s*wrap/);
+		expect(BODY).not.toMatch(/\.sift-footer\s*\{[^}]*flex-wrap:/);
+		expect(BODY).toMatch(/\.sift-curate--visible\s*\{[^}]*display:\s*flex/);
+		expect(BODY).toMatch(/\.sift-curate__button--hidden\s*\{[^}]*display:\s*none/);
+	});
+
+	it('drops the reserved excerpt line only where an excerpt can never arrive', () => {
+		expect(BODY).toMatch(/\.sift-card__snippets\s*\{[^}]*min-height:\s*21px/);
+		expect(BODY).toMatch(/\.sift-card__snippets--blank\s*\{[^}]*min-height:\s*0/);
 	});
 
 	it('carries no v1.1 class', () => {

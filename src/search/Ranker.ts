@@ -56,6 +56,22 @@
  * Linear as well: `maxRecencyBonus` for a file modified right now, decaying to
  * 1.0 at `recencyHalfLifeDays` and flat afterwards. A file with a timestamp in
  * the future is treated as age 0 rather than as a bonus multiplier > max.
+ *
+ * ---------------------------------------------------------------------------
+ * A RESULT SET WITH NO TERMS HAS NO RELEVANCE
+ * ---------------------------------------------------------------------------
+ * A search by filter alone (a date range, a folder) produces hits with an empty
+ * `matches` list — see the Searcher header. Every one of them would score the
+ * same, so relevance is not a small number here, it is a MEANINGLESS one, and
+ * dressing it up as "100 %" for the whole list would be a lie the user can read
+ * off the screen. Two consequences, both deliberate:
+ *
+ *  - `score` and `relevance` stay 0 for every hit, and the UI must not render a
+ *    relevance figure for a term-less result set.
+ *  - the ORDER falls back to a key that does mean something. A filter search is
+ *    a chronological question, so 'relevance' becomes 'created-desc' — newest
+ *    first. See {@link Ranker.effectiveSort}, which is the single place that
+ *    decides it.
  */
 
 import type {
@@ -110,6 +126,13 @@ function compareStrings(a: string, b: string): number {
  * × 0.7 fuzzy = 0.91, recovered by two occurrences).
  */
 const QUALITY_ORDER: Readonly<Record<MatchQuality, number>> = { exact: 0, alias: 1, fuzzy: 2 };
+
+/**
+ * Order a term-less result set is put in when the chosen key is 'relevance'.
+ * Newest first, because filters alone are asked as a chronological question.
+ * See {@link Ranker.effectiveSort}.
+ */
+const NO_TERM_FALLBACK_SORT: SortKey = 'created-desc';
 
 /**
  * Which string a match's offsets index into. Only matches from the same domain
@@ -189,18 +212,45 @@ export class Ranker {
 		this.weights = weights;
 	}
 
-	/** Scores, normalizes to 0-100 and returns hits sorted by relevance. `now` is injected so tests are deterministic. */
+	/**
+	 * Scores, normalizes to 0-100 and returns hits sorted by relevance. `now` is
+	 * injected so tests are deterministic.
+	 *
+	 * With no term in the query there is nothing to score: every hit keeps
+	 * `score` and `relevance` at 0 and the order comes from
+	 * {@link Ranker.effectiveSort} instead. The caller relies on this method
+	 * having ALREADY applied the order for the 'relevance' key — it skips its own
+	 * sort pass there — so the fallback has to happen here and not in the modal.
+	 */
 	rank(hits: readonly RawHit[], ast: QueryAst, now: number): RankedHit[] {
+		const scored = ast.terms.length > 0;
 		const ranked: RankedHit[] = hits.map((hit) => ({
 			...hit,
 			// The breakdown is the score: there is exactly one code path, so a
 			// diagnostic readout can never drift from the value that sorts.
-			score: this.scoreHit(hit, ast, now).total,
+			score: scored ? this.scoreHit(hit, ast, now).total : 0,
 			relevance: 0,
 		}));
-		Ranker.sort(ranked, 'relevance');
-		Ranker.normalize(ranked);
+		Ranker.sort(ranked, Ranker.effectiveSort('relevance', ast));
+		if (scored) Ranker.normalize(ranked);
 		return ranked;
+	}
+
+	/**
+	 * The sort key that is actually applied for `sort`.
+	 *
+	 * 'relevance' over a query with no positive term is not an order at all —
+	 * every hit of a filter-only search scores 0 — so it becomes
+	 * {@link NO_TERM_FALLBACK_SORT}, newest first. Every other key means the same
+	 * with or without terms and is returned unchanged.
+	 *
+	 * Anyone adding a sort key or changing what 'relevance' does goes through
+	 * here: `rank` and the UI both ask this function, so the label the user reads
+	 * and the order they see cannot drift apart.
+	 */
+	static effectiveSort(sort: SortKey, ast: QueryAst): SortKey {
+		if (sort !== 'relevance' || ast.terms.length > 0) return sort;
+		return NO_TERM_FALLBACK_SORT;
 	}
 
 	/** Full breakdown for one hit. Exists so a ranking change shows up as a diff in a test, not as a vibe. */
@@ -269,7 +319,14 @@ export class Ranker {
 		}
 	}
 
-	/** Applies a SortKey. 'relevance' keeps the scored order; every other key is a stable sort with path as tiebreaker. */
+	/**
+	 * Applies a SortKey. 'relevance' keeps the scored order; every other key is a
+	 * stable sort with path as tiebreaker.
+	 *
+	 * Takes the key at face value: passing 'relevance' for a term-less result set
+	 * leaves the hits in path order, which is why {@link Ranker.rank} resolves the
+	 * key through {@link Ranker.effectiveSort} first.
+	 */
 	static sort(hits: RankedHit[], sort: SortKey): RankedHit[] {
 		hits.sort((a, b) => Ranker.compare(a, b, sort));
 		return hits;
@@ -279,7 +336,9 @@ export class Ranker {
 		let primary = 0;
 		switch (sort) {
 			case 'relevance':
-				// Quality first, score second: see QUALITY_ORDER.
+				// Quality first, score second: see QUALITY_ORDER. Over a term-less
+				// result set both are constant and this key orders nothing —
+				// Ranker.effectiveSort is what keeps it from being used there.
 				primary = QUALITY_ORDER[a.quality] - QUALITY_ORDER[b.quality];
 				if (primary === 0) primary = b.score - a.score;
 				break;

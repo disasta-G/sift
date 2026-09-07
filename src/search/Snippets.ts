@@ -82,6 +82,19 @@
  * legitimate and gets an excerpt of that block; what stops is the spill-over
  * from one block into the next. The cluster itself is never clipped — if a
  * match spans an edge, the excerpt still contains all of it.
+ *
+ * ---------------------------------------------------------------------------
+ * A HIT WITH NO MATCHES GETS NO EXCERPT AND COSTS NO READ
+ * ---------------------------------------------------------------------------
+ * A search by filter alone — a date range, a folder, no query term — produces
+ * hits whose `matches` list is empty (see the Searcher header). There is nothing
+ * to excerpt: the first lines of the note would be an INVENTED excerpt, a
+ * passage that answers no question the user asked, and paying a `cachedRead` per
+ * card to produce it would turn a scan over the file records into a read of the
+ * whole vault. So such a hit comes back with an empty snippet array and the card
+ * renders its title, path and date — which is exactly what a filter search is
+ * asking to see. `readAndBuild` skips the read and `buildForFile` returns early,
+ * so both the async and the synchronous entry point agree.
  */
 
 import type { App } from 'obsidian';
@@ -317,7 +330,8 @@ export class Snippets {
 	private async readAndBuild(hit: RankedHit, maxPerHit: number): Promise<Snippet[]> {
 		if (maxPerHit <= 0) return [];
 		// A hit that matched on title or path alone has nothing to excerpt, so it
-		// does not deserve a file read either.
+		// does not deserve a file read either — and neither does a hit found by
+		// filters alone, whose match list is empty. `some` is false for both.
 		if (!hit.matches.some(isSnippetable)) return [];
 
 		const record = this.indexer.getFile(hit.fileId) ?? this.indexer.getFileByPath(hit.path);

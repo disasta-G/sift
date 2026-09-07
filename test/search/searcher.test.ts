@@ -527,9 +527,13 @@ describe('Searcher — query shape', () => {
 		}
 	});
 
-	it('returns nothing for an empty query', () => {
+	it('returns nothing for an empty query while no filter is set', () => {
+		// With a filter beside it an empty query IS a search, and the cases for
+		// that live in `test/search/filters.test.ts`. Without one there is no
+		// question to answer, negations included.
 		expect(run(small.searcher, '')).toEqual([]);
 		expect(run(small.searcher, '   ')).toEqual([]);
+		expect(run(small.searcher, '-kaffee')).toEqual([]);
 	});
 
 	it('orders matches by start and never overlaps within one term and field', () => {

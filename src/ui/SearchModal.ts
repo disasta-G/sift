@@ -30,6 +30,24 @@
  * The snippet reader carries a SECOND controller, one per rendered window. It
  * is aborted when the window moves, so the file reads for rows the user has
  * scrolled past stop instead of queueing ahead of the rows they are looking at.
+ *
+ * CURATING ONE RUN
+ * ----------------
+ * Each result is undecided, kept or dismissed, and that state belongs to a
+ * single search run: it is cleared at the top of every `executeSearch`, so a
+ * keystroke or a filter change starts over, and it is never written anywhere —
+ * nothing about it goes near `data.json`.
+ *
+ * It is modelled by making {@link SearchModal.items} the VISIBLE list. A
+ * dismissal splices the row out and pushes it, with the row it came from, onto
+ * {@link SearchModal.dismissed}; undo splices it back. Every piece of window
+ * arithmetic — the spacers, the block snapping, `aria-activedescendant` — keeps
+ * working on contiguous indices without knowing curation exists, and a dismissed
+ * card cannot reappear when it scrolls out of the window and back in, because
+ * there is nothing left in the list to render. "Kept" is held by PATH rather
+ * than by row, so it survives the splices; `writeSnippets` re-checks the path
+ * before it fills a card, because a batch that was in flight across a splice
+ * would otherwise write one row's excerpts into another row's card.
  */
 
 import { Component, MarkdownView, Modal, Notice, Platform, normalizePath, setIcon } from 'obsidian';
@@ -38,7 +56,9 @@ import { dateFormatLocale, hasKey, t } from '../i18n/index';
 import type { TranslationKey } from '../i18n/index';
 import { parseQuery } from '../search/QueryParser';
 import { Ranker } from '../search/Ranker';
+import { hasActiveFilters } from '../search/Searcher';
 import { FilterBar } from './FilterBar';
+import type { CountMode } from './FilterBar';
 import { CARD_ID_PREFIX, ResultCard } from './ResultCard';
 import type { Indexer } from '../index/Indexer';
 import type { Searcher } from '../search/Searcher';
@@ -57,6 +77,7 @@ import type {
 	SiftSettings,
 	SiftTuning,
 	SortKey,
+	VaultPath,
 } from '../types';
 
 export interface SearchModalDeps {
@@ -105,6 +126,19 @@ const INDEX_POLL_MS = 250;
 /** How long the opened note carries the flash class after a jump. */
 const FLASH_MS = 1400;
 
+/**
+ * Hard ceiling on how many notes one "open all" may put into tabs.
+ *
+ * A query can match thousands of notes; opening a tab for each of them wedges
+ * the workspace and there is no undo for that. Twenty is roughly the point at
+ * which a tab strip stops being readable, and it is the number the button and
+ * the confirmation both name out loud rather than truncating quietly.
+ */
+const OPEN_ALL_LIMIT = 20;
+
+/** Above this many, "open all" asks before it does anything. */
+const OPEN_ALL_CONFIRM_FROM = 5;
+
 
 /** Text of each empty state. `hint` is optional; a missing key is simply not rendered. */
 const EMPTY_STATE_KEYS: Readonly<
@@ -130,9 +164,24 @@ export class SearchModal extends Modal {
 	private sort: SortKey;
 	private fuzzy: boolean;
 
+	/** The VISIBLE result list: a dismissed row is spliced out of it, not flagged in it. */
 	private items: ResultItem[] = [];
 	private selected = -1;
 	private lastErrors: readonly { messageKey: string }[] = [];
+
+	/** Last completed search, kept so the counter can be rewritten while the run is curated. */
+	private summary: SearchSummary | null = null;
+	/** Cards the last search actually rendered; differs from the count when the cap bit. */
+	private shown = 0;
+	/** True while the current run has no positive term — filters alone brought these notes in. */
+	private noTerm = false;
+
+	/** Paths marked as worth keeping in this run. By path, so a splice cannot shift it. */
+	private readonly kept = new Set<VaultPath>();
+	/** Dismissed rows of this run, oldest first, each with the position it was removed from. */
+	private readonly dismissed: Array<{ index: number; item: ResultItem }> = [];
+	/** True once "open all" has been pressed and is waiting for its answer. */
+	private confirmingOpen = false;
 
 	private searchSeq = 0;
 	private abort: AbortController | null = null;
@@ -156,6 +205,11 @@ export class SearchModal extends Modal {
 	private bottomSpacerEl: HTMLElement | null = null;
 	private emptyEl: HTMLElement | null = null;
 	private filterBar: FilterBar | null = null;
+	private curateEl: HTMLElement | null = null;
+	private curateStatusEl: HTMLElement | null = null;
+	private undoEl: HTMLButtonElement | null = null;
+	private cancelOpenEl: HTMLButtonElement | null = null;
+	private openAllEl: HTMLButtonElement | null = null;
 
 	constructor(app: App, deps: SearchModalDeps, initialQuery?: string) {
 		super(app);
@@ -239,8 +293,17 @@ export class SearchModal extends Modal {
 		this.topSpacerEl = null;
 		this.bottomSpacerEl = null;
 		this.emptyEl = null;
+		this.curateEl = null;
+		this.curateStatusEl = null;
+		this.undoEl = null;
+		this.cancelOpenEl = null;
+		this.openAllEl = null;
 		this.items = [];
 		this.selected = -1;
+		this.summary = null;
+		this.shown = 0;
+		this.noTerm = false;
+		this.resetCuration();
 	}
 
 	setQuery(query: string): void {
@@ -268,6 +331,7 @@ export class SearchModal extends Modal {
 	renderResults(result: SearchResult): void {
 		this.items = [...result.items];
 		this.lastErrors = result.ast.errors;
+		this.resetCuration();
 		this.snippetAbort?.abort();
 		this.snippetAbort = null;
 		this.snippetRequested.clear();
@@ -280,6 +344,7 @@ export class SearchModal extends Modal {
 		if (this.items.length === 0) {
 			this.selected = -1;
 			this.renderEmptyState(this.emptyResultState(result.ast.errors.length > 0));
+			this.refreshCuration();
 			return;
 		}
 
@@ -289,27 +354,21 @@ export class SearchModal extends Modal {
 		this.windowStart = 0;
 		this.windowEnd = 0;
 		this.updateWindow(true);
+		this.refreshCuration();
 	}
 
 	renderEmptyState(kind: EmptyStateKind): void {
-		this.clearCards();
-		this.selected = -1;
-		this.updateActiveDescendant();
-		this.setSpacer(this.topSpacerEl, 0);
-		this.setSpacer(this.bottomSpacerEl, 0);
-		this.listEl?.addClass('sift-results__list--hidden');
+		const keys = EMPTY_STATE_KEYS[kind];
+		// A run with no term found nothing about FILTERS, not about a search word,
+		// so it must not report that "no note contains" a query the user never typed.
+		const filterWording = kind === 'no-results' && this.noTerm;
+		this.showEmpty(
+			t(keys.title),
+			filterWording ? t('empty.no-results.filters') : t(keys.body, { query: this.query.trim() }),
+			filterWording ? t('empty.no-results.filtersHint') : keys.hint === undefined ? null : t(keys.hint),
+		);
 		const el = this.emptyEl;
 		if (el === null) return;
-		el.empty();
-		el.addClass('sift-empty--visible');
-
-		const keys = EMPTY_STATE_KEYS[kind];
-		el.createDiv({ cls: 'sift-empty__title', text: t(keys.title) });
-		el.createDiv({
-			cls: 'sift-empty__body',
-			text: kind === 'no-results' ? t(keys.body, { query: this.query.trim() }) : t(keys.body),
-		});
-		if (keys.hint !== undefined) el.createDiv({ cls: 'sift-empty__hint', text: t(keys.hint) });
 
 		if (kind === 'query-error') {
 			const list = el.createDiv({ cls: 'sift-empty__errors' });
@@ -328,6 +387,23 @@ export class SearchModal extends Modal {
 					.createDiv({ cls: 'sift-empty__error', text: t('index.failureReason', { reason }) });
 			}
 		}
+	}
+
+	/** The empty panel, whatever put it there. Tears the list down and hands back the panel. */
+	private showEmpty(title: string, body: string, hint: string | null): void {
+		this.clearCards();
+		this.selected = -1;
+		this.updateActiveDescendant();
+		this.setSpacer(this.topSpacerEl, 0);
+		this.setSpacer(this.bottomSpacerEl, 0);
+		this.listEl?.addClass('sift-results__list--hidden');
+		const el = this.emptyEl;
+		if (el === null) return;
+		el.empty();
+		el.addClass('sift-empty--visible');
+		el.createDiv({ cls: 'sift-empty__title', text: title });
+		el.createDiv({ cls: 'sift-empty__body', text: body });
+		if (hint !== null) el.createDiv({ cls: 'sift-empty__hint', text: hint });
 	}
 
 	/** Moves the keyboard cursor and scrolls the card into view. Clamps at both ends. */
@@ -352,6 +428,164 @@ export class SearchModal extends Modal {
 			offset: jump.offset,
 			length: jump.length,
 		});
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* Curating the run                                                       */
+	/* ---------------------------------------------------------------------- */
+
+	/** Marks the selected result and moves on, so a run can be sorted without the mouse. */
+	keepSelected(): void {
+		const item = this.items[this.selected];
+		if (item === undefined) return;
+		const at = this.selected;
+		this.toggleKeep(at);
+		if (this.kept.has(item.path)) this.moveSelection(1);
+	}
+
+	/** Takes the selected result out of the run. Recoverable through {@link SearchModal.undoDismiss}. */
+	dismissSelected(): void {
+		this.dismissAt(this.selected);
+	}
+
+	/** Puts the most recently dismissed result back where it was. */
+	undoDismiss(): void {
+		const last = this.dismissed.pop();
+		if (last === undefined) return;
+		this.confirmingOpen = false;
+		const at = Math.max(0, Math.min(last.index, this.items.length));
+		this.items.splice(at, 0, last.item);
+		this.afterCurationChange(at);
+	}
+
+	/**
+	 * Opens what the run has been narrowed down to, one tab per note.
+	 *
+	 * Bounded twice, because this is the one gesture in the overlay that can put
+	 * the workspace into a state the user cannot easily get out of: it asks first
+	 * above {@link OPEN_ALL_CONFIRM_FROM}, and it never opens more than
+	 * {@link OPEN_ALL_LIMIT} — the button and the question both name the number.
+	 * Each note goes through the same `openFileAtOffset` a single Enter uses, one
+	 * after the other, so the tabs open in the order the list has them.
+	 */
+	async openRemaining(): Promise<void> {
+		const target = this.openTarget();
+		if (target.length === 0) return;
+		if (target.length > OPEN_ALL_CONFIRM_FROM && !this.confirmingOpen) {
+			this.confirmingOpen = true;
+			this.refreshCuration();
+			return;
+		}
+		this.confirmingOpen = false;
+		const batch = target.slice(0, OPEN_ALL_LIMIT);
+		this.close();
+		for (const item of batch) {
+			const jump = jumpPosition(item);
+			await SearchModal.openFileAtOffset(this.app, {
+				path: item.path,
+				target: 'new-tab',
+				offset: jump.offset,
+				length: jump.length,
+			});
+		}
+	}
+
+	/**
+	 * What "open all" would open.
+	 *
+	 * Keeping is how the user says "this one, for certain", so as soon as anything
+	 * is kept those are the notes that count and the undecided remainder is left
+	 * alone. With nothing kept there is no such signal and everything still listed
+	 * is the answer. The button's label says which of the two it is before it is
+	 * pressed; that is the whole point of having two wordings.
+	 */
+	private openTarget(): ResultItem[] {
+		const kept = this.items.filter((entry) => this.kept.has(entry.path));
+		return kept.length > 0 ? kept : this.items;
+	}
+
+	private toggleKeep(index: number): void {
+		const item = this.items[index];
+		if (item === undefined) return;
+		this.confirmingOpen = false;
+		const next = !this.kept.has(item.path);
+		if (next) this.kept.add(item.path);
+		else this.kept.delete(item.path);
+		this.cards.get(index)?.setKept(next);
+		this.applySelection(index, false);
+		this.refreshCuration();
+	}
+
+	private dismissAt(index: number): void {
+		const item = this.items[index];
+		if (item === undefined) return;
+		this.confirmingOpen = false;
+		this.kept.delete(item.path);
+		this.items.splice(index, 1);
+		this.dismissed.push({ index, item });
+		this.afterCurationChange(index);
+	}
+
+	/**
+	 * Repaints the list after a splice.
+	 *
+	 * The snippet run is stopped and its claims dropped first: every claim is a
+	 * ROW number, and the rows below the splice have just moved. The window is
+	 * then rebuilt from the CURRENT scroll position rather than from the top, so
+	 * dismissing something halfway down a long list does not throw the user back
+	 * to the first card.
+	 */
+	private afterCurationChange(select: number): void {
+		this.snippetAbort?.abort();
+		this.snippetAbort = null;
+		this.snippetRequested.clear();
+
+		if (this.items.length === 0) {
+			this.selected = -1;
+			this.showEmpty(t('curate.emptyTitle'), t('curate.emptyBody'), null);
+			this.refreshCount();
+			this.refreshCuration();
+			return;
+		}
+
+		this.hideEmptyState();
+		this.selected = Math.max(0, Math.min(select, this.items.length - 1));
+		this.updateWindow(true);
+		this.cards.get(this.selected)?.scrollIntoViewIfNeeded();
+		this.refreshCount();
+		this.refreshCuration();
+		this.recoverFocus();
+	}
+
+	/**
+	 * Puts the focus back in the search field when the element that had it has
+	 * just been destroyed.
+	 *
+	 * Dismissing with the mouse removes the very button that was clicked, and the
+	 * focus falls to the document body — the next character the user types then
+	 * goes nowhere. Only that case is corrected: a focus that is still somewhere
+	 * inside the modal (the keep button, which survives, or a filter control) is
+	 * where its owner put it and is left alone.
+	 */
+	private recoverFocus(): void {
+		const active = this.contentEl.ownerDocument.activeElement;
+		if (active !== null && this.contentEl.contains(active)) return;
+		this.inputEl?.focus();
+	}
+
+	/** Everything a run's curation consists of. Called at the start of every search; never persisted. */
+	private resetCuration(): void {
+		this.kept.clear();
+		this.dismissed.length = 0;
+		this.confirmingOpen = false;
+	}
+
+	private keptCount(): number {
+		let count = 0;
+		for (const entry of this.items) {
+			if (this.kept.has(entry.path)) count++;
+		}
+		return count;
 	}
 
 	/** Opens the file and places the cursor on the offset, with a temporary highlight. Exported for reuse and tests. */
@@ -418,18 +652,102 @@ export class SearchModal extends Modal {
 			cls: 'sift-footer',
 			attr: { 'aria-label': t('footer.hints') },
 		});
-		const modEnter = Platform.isMacOS ? t('footer.key.modEnterMac') : t('footer.key.modEnter');
-		this.buildHint(footer, t('footer.key.arrows'), t('footer.navigate'));
-		this.buildHint(footer, t('footer.key.enter'), t('footer.open'));
-		this.buildHint(footer, modEnter, t('footer.newTab'));
-		this.buildHint(footer, t('footer.key.esc'), t('footer.close'));
-		// The trailing slot after the hints stays empty in v1.0.
+		const mac = Platform.isMacOS;
+		// The hints wrap among themselves; the curation controls stay on the right
+		// of the first row rather than being pushed onto a line of their own.
+		const hints = footer.createDiv({ cls: 'sift-footer__hints' });
+		this.buildHint(hints, t('footer.key.arrows'), t('footer.navigate'));
+		this.buildHint(hints, t('footer.key.enter'), t('footer.open'));
+		this.buildHint(hints, mac ? t('footer.key.modEnterMac') : t('footer.key.modEnter'), t('footer.newTab'));
+		this.buildHint(hints, mac ? t('footer.key.modShiftKMac') : t('footer.key.modShiftK'), t('footer.keep'));
+		this.buildHint(hints, mac ? t('footer.key.modShiftXMac') : t('footer.key.modShiftX'), t('footer.dismiss'));
+		this.buildHint(hints, mac ? t('footer.key.modShiftZMac') : t('footer.key.modShiftZ'), t('footer.undo'));
+		this.buildHint(hints, t('footer.key.esc'), t('footer.close'));
+		this.buildCurateGroup(footer);
 	}
 
 	private buildHint(footer: HTMLElement, glyph: string, label: string): void {
 		const hint = footer.createSpan({ cls: 'sift-footer__hint' });
 		hint.createEl('kbd', { cls: 'sift-key', text: glyph });
 		hint.appendText(` ${label}`);
+	}
+
+	/**
+	 * The curation controls, in the footer's trailing slot.
+	 *
+	 * They live here rather than in a row of their own so that turning a run into
+	 * a shortlist costs no vertical space: the footer is already the strip that
+	 * says what the keyboard can do, and these are the same actions with a mouse.
+	 * The status is a polite live region, so a dismissal and a pending
+	 * confirmation are announced instead of only being visible.
+	 */
+	private buildCurateGroup(footer: HTMLElement): void {
+		const group = footer.createDiv({ cls: 'sift-curate' });
+		this.curateEl = group;
+		this.curateStatusEl = group.createSpan({
+			cls: 'sift-curate__status',
+			attr: { role: 'status', 'aria-live': 'polite' },
+		});
+		this.undoEl = group.createEl('button', {
+			cls: 'sift-curate__button sift-curate__undo sift-curate__button--hidden',
+			text: t('curate.undo'),
+			attr: { type: 'button' },
+		});
+		this.cancelOpenEl = group.createEl('button', {
+			cls: 'sift-curate__button sift-curate__cancel sift-curate__button--hidden',
+			text: t('curate.cancel'),
+			attr: { type: 'button' },
+		});
+		this.openAllEl = group.createEl('button', {
+			cls: 'sift-curate__button sift-curate__open sift-curate__button--primary',
+			attr: { type: 'button' },
+		});
+
+		this.lifecycle.registerDomEvent(this.undoEl, 'click', (evt: MouseEvent) => {
+			evt.preventDefault();
+			this.undoDismiss();
+		});
+		this.lifecycle.registerDomEvent(this.cancelOpenEl, 'click', (evt: MouseEvent) => {
+			evt.preventDefault();
+			this.confirmingOpen = false;
+			this.refreshCuration();
+		});
+		this.lifecycle.registerDomEvent(this.openAllEl, 'click', (evt: MouseEvent) => {
+			evt.preventDefault();
+			void this.openRemaining();
+		});
+		this.refreshCuration();
+	}
+
+	/** Rewrites the footer controls from the current curation state. Cheap; called after every change. */
+	private refreshCuration(): void {
+		const group = this.curateEl;
+		if (group === null) return;
+		const hasRun = this.items.length > 0 || this.dismissed.length > 0;
+		group.toggleClass('sift-curate--visible', hasRun);
+		this.undoEl?.toggleClass('sift-curate__button--hidden', this.dismissed.length === 0);
+		this.cancelOpenEl?.toggleClass('sift-curate__button--hidden', !this.confirmingOpen);
+
+		const open = this.openAllEl;
+		if (open !== null) {
+			const target = this.openTarget();
+			open.toggleClass('sift-curate__button--hidden', target.length === 0);
+			open.setText(this.confirmingOpen ? t('curate.confirmAccept') : openAllLabel(target.length, this.keptCount() > 0));
+		}
+		this.curateStatusEl?.setText(this.curateStatusText());
+	}
+
+	private curateStatusText(): string {
+		if (this.confirmingOpen) {
+			const total = this.openTarget().length;
+			const batch = Math.min(total, OPEN_ALL_LIMIT);
+			return batch < total
+				? t('curate.confirmCapped', { n: batch, total })
+				: t('curate.confirmQuestion', { n: batch });
+		}
+		const kept = this.keptCount();
+		if (kept === 0) return '';
+		return kept === 1 ? t('curate.keptOne') : t('curate.keptCount', { n: kept });
 	}
 
 	/**
@@ -489,6 +807,34 @@ export class SearchModal extends Modal {
 			void this.openSelected({ target: 'split' });
 			return false;
 		});
+
+		// CURATION KEYS — see the class header for why they all carry Mod+Shift.
+		// The search field owns every unmodified key, and a letter key with Alt
+		// alone is not layout-stable (on macOS Option remaps it to a dead key or a
+		// symbol, so `evt.key` is no longer the letter), which leaves Mod+Shift as
+		// the one combination that is both free of text-editing meaning and spelled
+		// the same on every keyboard.
+		this.scope.register(['Mod', 'Shift'], 'K', (evt) => {
+			if (this.filterBarHasFocus()) return true;
+			evt.preventDefault();
+			this.keepSelected();
+			return false;
+		});
+		this.scope.register(['Mod', 'Shift'], 'X', (evt) => {
+			if (this.filterBarHasFocus()) return true;
+			evt.preventDefault();
+			this.dismissSelected();
+			return false;
+		});
+		this.scope.register(['Mod', 'Shift'], 'Z', (evt) => {
+			if (this.filterBarHasFocus()) return true;
+			// Nothing dismissed means nothing to undo, and an overlay that swallows
+			// the gesture anyway would be a key that does nothing.
+			if (this.dismissed.length === 0) return true;
+			evt.preventDefault();
+			this.undoDismiss();
+			return false;
+		});
 	}
 
 	/**
@@ -535,33 +881,43 @@ export class SearchModal extends Modal {
 		this.abort?.abort();
 		this.snippetAbort?.abort();
 		this.snippetAbort = null;
+		// A new run, so the previous run's curation is gone. It exists for exactly
+		// one query and one set of filters and is never written anywhere.
+		this.resetCuration();
 		const controller = new AbortController();
 		this.abort = controller;
 
 		if (!this.deps.indexer.isReady()) {
 			this.items = [];
+			this.noTerm = false;
 			this.setCount(null);
 			this.renderEmptyState('indexing');
+			this.refreshCuration();
 			this.scheduleIndexPoll();
-			return;
-		}
-
-		if (this.query.trim().length === 0) {
-			this.items = [];
-			this.lastErrors = [];
-			this.setCount(null);
-			this.renderEmptyState('initial');
 			return;
 		}
 
 		const ast = parseQuery(this.query, this.deps.tuning);
 		this.lastErrors = ast.errors;
-		if (ast.isEmpty) {
+		// A SET FILTER IS A SEARCH. `ast.isEmpty` alone used to mean "show the
+		// empty state", which made a date range or a folder on its own unusable:
+		// the user narrowed the vault down and the overlay answered by asking them
+		// to type something. The initial state is now reserved for a query that
+		// asks for nothing at all.
+		this.noTerm = ast.isEmpty;
+		if (ast.isEmpty && !hasActiveFilters(this.filters)) {
 			this.items = [];
+			this.noTerm = false;
 			this.setCount(null);
 			this.renderEmptyState(ast.errors.length > 0 ? 'query-error' : 'initial');
+			this.refreshCuration();
 			return;
 		}
+		// Without a term there is no relevance to sort by. `Ranker.rank` has already
+		// put such a run into the fallback order; the dropdown is moved onto the
+		// same key so it cannot claim "Relevance" over a list that is not in that
+		// order. `Ranker.effectiveSort` decides which key that is, for both.
+		this.applySort(Ranker.effectiveSort(this.sort, ast));
 
 		const started = performance.now();
 		const raw = this.deps.searcher.search(ast, {
@@ -671,6 +1027,10 @@ export class SearchModal extends Modal {
 			const source = built[at];
 			const current = this.items[index];
 			if (source === undefined || current === undefined) continue;
+			// The batch was requested by ROW, and a dismissal or an undo moves every
+			// row below it. Without this check a run that was in flight across a
+			// splice writes one note's excerpts into another note's card.
+			if (source.path !== current.path) continue;
 			if (source.snippets.length === 0) continue;
 			this.items[index] = { ...current, snippets: source.snippets };
 			this.cards.get(index)?.update(this.cardModel(index));
@@ -788,19 +1148,35 @@ export class SearchModal extends Modal {
 		list.removeClass('sift-results__list--hidden');
 
 		for (let index = this.windowStart; index < this.windowEnd; index++) {
-			if (this.items[index] === undefined) continue;
-			const card = new ResultCard(list, this.cardModel(index), {
-				// A pointer selection must not scroll: the correction would fire a
-				// scroll event between mousedown and mouseup, and a window rebuild
-				// there detaches the very node the button is pressed on, so the
-				// browser never dispatches the click. The keyboard path scrolls.
-				onSelect: (at) => {
-					this.applySelection(at, false);
+			const item = this.items[index];
+			if (item === undefined) continue;
+			const card = new ResultCard(
+				list,
+				this.cardModel(index),
+				{
+					// A pointer selection must not scroll: the correction would fire a
+					// scroll event between mousedown and mouseup, and a window rebuild
+					// there detaches the very node the button is pressed on, so the
+					// browser never dispatches the click. The keyboard path scrolls.
+					onSelect: (at) => {
+						this.applySelection(at, false);
+					},
+					onOpen: (opened, target) => {
+						void this.openItem(opened, target);
+					},
 				},
-				onOpen: (item, target) => {
-					void this.openItem(item, target);
+				{
+					// Read from the path set, so a card rebuilt after a scroll or a
+					// splice comes back with the mark it had.
+					kept: this.kept.has(item.path),
+					onKeep: (at) => {
+						this.toggleKeep(at);
+					},
+					onDismiss: (at) => {
+						this.dismissAt(at);
+					},
 				},
-			});
+			);
 			this.cards.set(index, card);
 		}
 
@@ -912,8 +1288,46 @@ export class SearchModal extends Modal {
 
 	/** `shown` is the number of cards actually in the list; it differs from `count` when the cap bit. */
 	private setCount(summary: SearchSummary | null, shown = 0): void {
-		this.countEl?.setText(summary === null ? '' : countText(summary, shown));
-		this.filterBar?.setSummary(summary);
+		this.summary = summary;
+		this.shown = shown;
+		this.refreshCount();
+		this.filterBar?.setSummary(summary, this.countMode());
+	}
+
+	/**
+	 * Rewrites the header counter.
+	 *
+	 * While a run is being curated it reports what is LEFT and what was thrown
+	 * away, rather than quietly counting down: "12 results" turning into "9
+	 * results" would read as the search having found fewer notes than it did.
+	 */
+	private refreshCount(): void {
+		const summary = this.summary;
+		if (summary === null) {
+			this.countEl?.setText('');
+			return;
+		}
+		this.countEl?.setText(
+			this.dismissed.length > 0
+				? t('curate.left', { n: this.items.length, dismissed: this.dismissed.length })
+				: countText(summary, this.shown, this.countMode()),
+		);
+	}
+
+	private countMode(): CountMode {
+		return this.noTerm ? 'notes' : 'results';
+	}
+
+	/** Switches the sort order and shows the switch in the dropdown, so the label never lies. */
+	private applySort(sort: SortKey): void {
+		if (this.sort === sort) return;
+		this.sort = sort;
+		this.filterBar?.setState({
+			filters: this.filters,
+			sort,
+			fuzzy: this.fuzzy,
+			summary: this.summary,
+		});
 	}
 
 	private async openItem(item: ResultItem, target: OpenTarget): Promise<void> {
@@ -1076,8 +1490,25 @@ function similarWords(matches: readonly Match[]): string[] {
 	return words;
 }
 
-/** The counter line: "12 results · 38 ms", with its own singular and truncated forms. */
-function countText(summary: SearchSummary, shown: number): string {
+/**
+ * The counter line: "12 results · 38 ms", with its own singular and truncated
+ * forms.
+ *
+ * In `notes` mode it counts NOTES and drops the duration. Neither half of "127
+ * results · 3 ms" is true of a filter scan: nothing was searched for, so there
+ * are no hits, and the milliseconds would advertise a speed for work that was
+ * mostly not done — a number that invites comparison with a real query and loses
+ * the comparison the moment one is typed.
+ */
+function countText(summary: SearchSummary, shown: number, mode: CountMode): string {
+	if (mode === 'notes') {
+		if (summary.count === 0) return t('search.notesNone');
+		if (summary.truncated && shown > 0 && shown < summary.count) {
+			return t('search.notesTruncated', { n: shown, total: summary.count });
+		}
+		if (summary.count === 1) return t('search.notesOne');
+		return t('search.notes', { n: summary.count });
+	}
 	const ms = Math.round(summary.durationMs);
 	if (summary.count === 0) return t('search.countNone', { ms });
 	if (summary.truncated && shown > 0 && shown < summary.count) {
@@ -1085,6 +1516,13 @@ function countText(summary: SearchSummary, shown: number): string {
 	}
 	if (summary.count === 1) return t('search.countOne', { ms });
 	return t('search.count', { n: summary.count, ms });
+}
+
+/** What "open all" promises before it is pressed: which set, how many, and whether the cap bites. */
+function openAllLabel(total: number, keptMode: boolean): string {
+	if (total > OPEN_ALL_LIMIT) return t('curate.openCapped', { n: OPEN_ALL_LIMIT, total });
+	if (keptMode) return total === 1 ? t('curate.openKeptOne') : t('curate.openKept', { n: total });
+	return total === 1 ? t('curate.openOne') : t('curate.openAll', { n: total });
 }
 
 function indexRange(start: number, end: number): number[] {

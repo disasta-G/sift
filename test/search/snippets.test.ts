@@ -1120,6 +1120,21 @@ describe('Snippets.build', () => {
 		expect(items[0].snippets).toHaveLength(0);
 	});
 
+	it('invents no excerpt and reads no file for a hit found by filters alone', async () => {
+		// A date range or a folder with no query term matches the whole note, not
+		// a position in it: the card renders title, path and date, and the first
+		// lines of the file would be an excerpt answering no question.
+		const { app, snippets } = setUp();
+
+		const items = await snippets.build([makeHit({ fileId: 1, path: 'Notizen/Kueche.md', matches: [] })], 2);
+
+		expect(app.totalReadCount()).toBe(0);
+		expect(items).toHaveLength(1);
+		expect(items[0].snippets).toEqual([]);
+		expect(items[0].similarTo).toEqual([]);
+		expect(items[0].path).toBe('Notizen/Kueche.md');
+	});
+
 	it('collects the distinct fuzzy words a hit was reached by', async () => {
 		const { snippets } = setUp();
 		const matches = [

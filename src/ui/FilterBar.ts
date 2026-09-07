@@ -33,6 +33,18 @@
  * modal stays where it is. The scope is popped the moment it closes, including
  * from `destroy()`.
  *
+ * KEEPING THE DATE POPOVER INSIDE THE MODAL
+ * -----------------------------------------
+ * The popover is positioned against the chip, and the modal clips at
+ * `overflow: hidden`, so a chip far enough right puts part of the calendar
+ * outside the panel where it can be neither seen nor clicked. CSS alone cannot
+ * decide that — it depends on where the chip ends up after the bar has wrapped —
+ * so the two edges are measured when the popover opens (and again on a resize)
+ * and handed to {@link placePopover}, which returns the `left` and the
+ * `max-width` as two custom properties on the wrapper. The stylesheet keeps the
+ * mockup's left-aligned default in the `var()` fallback, which is also what a
+ * layout with no geometry yet gets.
+ *
  * THE CALENDAR'S KEYS RIDE THE SAME SCOPE
  * --------------------------------------
  * Arrow keys, PageUp/PageDown and Enter drive the calendar grid, and they go
@@ -90,6 +102,25 @@ const WEEKDAY_EPOCH = { year: 2024, month: 0, day: 1 };
 
 /** DOM id of the month caption, so the grid can be labelled by it. */
 const MONTH_LABEL_ID = 'sift-cal-month';
+
+/**
+ * Gap kept between the date popover and the edge of the modal panel.
+ *
+ * `.sift-modal` clips at `overflow: hidden`, so a popover flush with that edge
+ * loses its own border to the clip even when the arithmetic says it fits.
+ */
+const POPOVER_GUTTER = 8;
+
+/**
+ * How the hit counter reads.
+ *
+ * A run with a search term counts RESULTS and may boast about the milliseconds
+ * it took; a run that is nothing but filters counts NOTES, because a scan of
+ * everything that passes a date range has neither hits nor a search time worth
+ * quoting. The modal decides which it is and tells the bar, so the visible
+ * counter in the header and this bar's live region cannot drift apart.
+ */
+export type CountMode = 'results' | 'notes';
 
 /** Sort options, in the order the dropdown offers them. */
 const SORT_KEYS: readonly SortKey[] = [
@@ -223,6 +254,66 @@ export function quickPickRange(
 	return { createdFrom: addDays(now, -QUICK_PICK_DAYS[kind]), createdTo: endOfDay(now) };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Popover placement                                                          */
+/* -------------------------------------------------------------------------- */
+
+/** Everything {@link placePopover} needs, all in one coordinate space. */
+export interface PopoverGeometry {
+	/** Left edge of the element the popover hangs off — its offset parent. */
+	anchorLeft: number;
+	/** Right edge of that element. */
+	anchorRight: number;
+	/** Width the popover wants, measured with no clamp applied. */
+	popoverWidth: number;
+	/** Left edge of the box the popover may not leave. */
+	boundsLeft: number;
+	/** Right edge of that box. */
+	boundsRight: number;
+}
+
+/** What the popover's `left` and `max-width` should be. */
+export interface PopoverPlacement {
+	/** Offset from `anchorLeft`, in pixels; the popover is positioned against the anchor. */
+	left: number;
+	/** Widest the popover may be and still fit between the bounds. */
+	maxWidth: number;
+}
+
+/**
+ * Where the date popover has to sit so the modal cannot cut it off.
+ *
+ * The default — hanging off the anchor's LEFT edge — is what the mockup draws
+ * and is kept whenever it fits. It stops fitting as soon as the chip moves right
+ * inside the bar: measured in the browser at 809px of modal, the created chip
+ * sat at x 714..805 with a 379px popover, so it reached x 1093 and the panel's
+ * `overflow: hidden` ate the last 112px — the Saturday and Sunday columns and
+ * the clear button, none of which could be clicked at all.
+ *
+ * The fix is the ordinary three-step of a flipping popover, and all three steps
+ * are needed:
+ *   1. left-align to the anchor;
+ *   2. if that overflows the right bound, RIGHT-align to the anchor instead;
+ *   3. clamp into the bounds, which is what catches the mirror case — an anchor
+ *      so far left that the right-aligned popover would now hang off the other
+ *      side — and, with the width clamp, a panel narrower than the popover.
+ *
+ * A wrapped filter bar needs nothing extra: wrapping moves the chip vertically,
+ * and the popover follows it because it is positioned against the chip; only the
+ * horizontal clamp decides whether anything is cut.
+ */
+export function placePopover(geometry: PopoverGeometry): PopoverPlacement {
+	const available = Math.max(0, geometry.boundsRight - geometry.boundsLeft);
+	const width = Math.min(geometry.popoverWidth, available);
+
+	let left = geometry.anchorLeft;
+	if (left + width > geometry.boundsRight) left = geometry.anchorRight - width;
+	if (left < geometry.boundsLeft) left = geometry.boundsLeft;
+	if (left + width > geometry.boundsRight) left = geometry.boundsRight - width;
+
+	return { left: Math.round(left - geometry.anchorLeft), maxWidth: Math.round(available) };
+}
+
 /** Folder suggestions for the path chip, backed by the vault's own folder list. */
 class FolderSuggest extends AbstractInputSuggest<TFolder> {
 	private readonly onPick: (path: VaultPath) => void;
@@ -310,6 +401,8 @@ export class FilterBar {
 	/** The created bounds the visible month was last synchronised to. */
 	private syncedFrom: Millis | null;
 	private syncedTo: Millis | null;
+	/** How {@link FilterBar.renderSummary} words the live region. */
+	private summaryMode: CountMode = 'results';
 
 	constructor(
 		app: App,
@@ -493,6 +586,14 @@ export class FilterBar {
 			if (target instanceof Node && this.dateWrapEl.contains(target)) return;
 			this.toggleDateMenu(false);
 		});
+		// A resize moves the chip inside the bar — and can rewrap the bar entirely —
+		// so an open popover is placed again rather than left where it was.
+		const view = this.el.ownerDocument.defaultView;
+		if (view !== null) {
+			this.lifecycle.registerDomEvent(view, 'resize', () => {
+				this.positionDateMenu();
+			});
+		}
 
 		/* --- spacer, sort, live region -------------------------------------- */
 		this.el.createDiv({ cls: 'sift-filters__spacer' });
@@ -537,8 +638,10 @@ export class FilterBar {
 		if (summaryChanged) this.renderSummary();
 	}
 
-	setSummary(summary: SearchSummary | null): void {
-		if (summaryEquals(this.state.summary, summary)) return;
+	/** `mode` decides the wording; see {@link CountMode}. */
+	setSummary(summary: SearchSummary | null, mode: CountMode = 'results'): void {
+		if (summaryEquals(this.state.summary, summary) && this.summaryMode === mode) return;
+		this.summaryMode = mode;
 		this.state = { ...this.state, summary: summary === null ? null : { ...summary } };
 		this.renderSummary();
 	}
@@ -717,6 +820,8 @@ export class FilterBar {
 		this.dateWrapEl.toggleClass('sift-filters__date--open', open);
 		this.dateChipEl.setAttr('aria-expanded', open ? 'true' : 'false');
 		if (open) {
+			// After the class, never before: a `display: none` popover measures zero.
+			this.positionDateMenu();
 			this.app.keymap.pushScope(this.menuScope);
 		} else {
 			// A half-made range does not survive a close: the filter keeps the start
@@ -782,6 +887,10 @@ export class FilterBar {
 		this.dateRemoveEl.toggleClass('sift-chip__remove--visible', active);
 		this.syncVisibleMonth();
 		this.renderCalendar();
+		// The chip has just changed width — an empty "Created" is far narrower than
+		// "Created 07.09.2025 – 07.09.2026" — and the popover is anchored to it, so
+		// a placement made when it opened no longer lines up with its own chip.
+		this.positionDateMenu();
 	}
 
 	/**
@@ -939,7 +1048,47 @@ export class FilterBar {
 			this.statusEl.setText('');
 			return;
 		}
-		this.statusEl.setText(summaryText(summary));
+		this.statusEl.setText(summaryText(summary, this.summaryMode));
+	}
+
+	/**
+	 * Places the open popover inside the modal panel.
+	 *
+	 * The two custom properties are cleared first so the popover is MEASURED at
+	 * its natural width rather than at whatever a previous placement clamped it
+	 * to; without that the width would ratchet down every time the bar rewrapped.
+	 * A layout that has not happened yet — a test DOM, the first paint — reports
+	 * zero for every rect, and a placement computed from zeroes is a guess, so
+	 * nothing is written and the popover keeps the mockup's left-aligned default.
+	 */
+	private positionDateMenu(): void {
+		if (!this.isDateMenuOpen()) return;
+		this.dateWrapEl.setCssProps({ '--sift-date-menu-left': '0px', '--sift-date-menu-max-width': 'none' });
+
+		const anchor = this.dateWrapEl.getBoundingClientRect();
+		const menu = this.dateMenuEl.getBoundingClientRect();
+		const bounds = this.popoverBounds();
+		if (bounds === null || menu.width <= 0) return;
+
+		const placement = placePopover({
+			anchorLeft: anchor.left,
+			anchorRight: anchor.right,
+			popoverWidth: menu.width,
+			boundsLeft: bounds.left + POPOVER_GUTTER,
+			boundsRight: bounds.right - POPOVER_GUTTER,
+		});
+		this.dateWrapEl.setCssProps({
+			'--sift-date-menu-left': `${placement.left}px`,
+			'--sift-date-menu-max-width': `${placement.maxWidth}px`,
+		});
+	}
+
+	/** The box the popover may not leave: the modal panel, which is what clips it. */
+	private popoverBounds(): { left: number; right: number } | null {
+		const modal = this.el.closest('.sift-modal');
+		const box = modal instanceof HTMLElement ? modal : this.el;
+		const rect = box.getBoundingClientRect();
+		return rect.width > 0 ? { left: rect.left, right: rect.right } : null;
 	}
 }
 
@@ -990,7 +1139,12 @@ function clampToMonth(day: Millis, month: Millis): Millis {
 }
 
 /** The same anatomy the header counter uses, for the live region. */
-function summaryText(summary: SearchSummary): string {
+function summaryText(summary: SearchSummary, mode: CountMode): string {
+	if (mode === 'notes') {
+		if (summary.count === 0) return t('search.notesNone');
+		if (summary.count === 1) return t('search.notesOne');
+		return t('search.notes', { n: summary.count });
+	}
 	const ms = Math.round(summary.durationMs);
 	if (summary.count === 0) return t('search.countNone', { ms });
 	if (summary.count === 1) return t('search.countOne', { ms });

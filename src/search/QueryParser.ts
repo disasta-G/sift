@@ -373,6 +373,12 @@ export function parseQuery(raw: string, tuning: SiftTuning): QueryAst {
 		should,
 		raw,
 		errors,
+		// "No positive term", and nothing more. Whether a search should RUN
+		// depends on the filter bar as well, which the parser cannot see: the
+		// caller combines this with `hasActiveFilters(filters)` — see the note on
+		// QueryAst.isEmpty. A query of nothing but negations is therefore still
+		// empty here, and it is the Searcher that decides what `-altbau` means
+		// beside a date range.
 		isEmpty: terms.length === 0,
 		terms,
 	};

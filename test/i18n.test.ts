@@ -55,6 +55,7 @@ describe('bundle shape', () => {
 			'filter.',
 			'sort.',
 			'result.',
+			'curate.',
 			'empty.',
 			'error.',
 			'settings.',

@@ -8,6 +8,16 @@
  * is how marks survive the no-innerHTML rule. Dumb component — it reads its
  * model and calls back, it never touches the index.
  *
+ * CURATION CONTROLS
+ * -----------------
+ * With a {@link CardCuration} the head grows two buttons, "keep" and "dismiss".
+ * They are real `<button>` elements with `aria-label`s rather than a hover-only
+ * affordance, so they are reachable and named for the keyboard and for assistive
+ * tech, and they stop their own events so the card underneath neither selects
+ * nor opens. The card holds no curation state of its own: the modal owns it for
+ * the duration of one search run and pushes it in through the constructor and
+ * {@link ResultCard.setKept}.
+ *
  * MULTI-LINE EXCERPTS
  * -------------------
  * A {@link Snippet} covers up to five LINES of the note, so `snippet.text` may
@@ -27,8 +37,9 @@
  * tears the whole tree down in one step.
  */
 
-import { Component, Keymap } from 'obsidian';
+import { Component, Keymap, setIcon } from 'obsidian';
 import { t } from '../i18n/index';
+import type { TranslationKey } from '../i18n/index';
 import type {
 	Millis,
 	OpenTarget,
@@ -51,6 +62,21 @@ export const CARD_ID_PREFIX = 'sift-result-';
 /** U+000A LINE FEED and U+000D CARRIAGE RETURN, the two break characters an excerpt can carry. */
 const CHAR_LF = 0x0a;
 const CHAR_CR = 0x0d;
+
+/**
+ * The two curation controls a card carries, and the state of the first of them.
+ *
+ * Optional: a card built without this object has no buttons at all, which is
+ * what keeps `ResultCard` usable outside a curated run. The state lives with the
+ * modal — one search run owns it, nothing is persisted — so the card only
+ * renders what it is told and reports the two gestures back by row index.
+ */
+export interface CardCuration {
+	/** True when the user has marked this result as one to keep. */
+	kept: boolean;
+	onKeep(index: number): void;
+	onDismiss(index: number): void;
+}
 
 /** One run of snippet text, already classified. */
 interface TextRun {
@@ -76,8 +102,14 @@ export class ResultCard {
 	private readonly dateEl: HTMLElement;
 	private readonly pathEl: HTMLElement;
 	private readonly snippetsEl: HTMLElement;
+	private readonly keepEl: HTMLButtonElement | null = null;
 
-	constructor(parent: HTMLElement, model: ResultCardModel, callbacks: ResultCardCallbacks) {
+	constructor(
+		parent: HTMLElement,
+		model: ResultCardModel,
+		callbacks: ResultCardCallbacks,
+		curation?: CardCuration,
+	) {
 		this.model = model;
 		this.callbacks = callbacks;
 
@@ -94,10 +126,21 @@ export class ResultCard {
 		this.titleEl = head.createDiv({ cls: 'sift-card__title' });
 		this.similarEl = head.createDiv({ cls: 'sift-card__similar' });
 		this.dateEl = head.createDiv({ cls: 'sift-card__date' });
+
+		this.lifecycle.load();
+		if (curation !== undefined) {
+			const actions = head.createDiv({ cls: 'sift-card__actions' });
+			this.keepEl = this.buildAction(actions, 'keep', 'bookmark', 'curate.keep', () => {
+				curation.onKeep(this.model.index);
+			});
+			this.buildAction(actions, 'dismiss', 'x', 'curate.dismiss', () => {
+				curation.onDismiss(this.model.index);
+			});
+		}
+
 		this.pathEl = this.el.createDiv({ cls: 'sift-card__path' });
 		this.snippetsEl = this.el.createDiv({ cls: 'sift-card__snippets' });
 
-		this.lifecycle.load();
 		this.lifecycle.registerDomEvent(this.el, 'click', (evt: MouseEvent) => {
 			this.callbacks.onSelect(this.model.index);
 			this.callbacks.onOpen(this.model.item, targetFromEvent(evt));
@@ -107,6 +150,39 @@ export class ResultCard {
 		});
 
 		this.render();
+		this.setKept(curation?.kept === true);
+	}
+
+	/**
+	 * One curation button.
+	 *
+	 * A real `<button>` with an `aria-label`, so the control is in the tab order
+	 * and has a name — a hover-only affordance would be neither. Both the click
+	 * and the mousedown stop at the button: the card's own handlers sit on the
+	 * ancestor and would otherwise select the row and open the note underneath
+	 * the very gesture that was meant to sort it.
+	 */
+	private buildAction(
+		actions: HTMLElement,
+		kind: 'keep' | 'dismiss',
+		icon: string,
+		label: TranslationKey,
+		run: () => void,
+	): HTMLButtonElement {
+		const button = actions.createEl('button', {
+			cls: `sift-card__action sift-card__action--${kind}`,
+			attr: { type: 'button', 'aria-label': t(label) },
+		});
+		setIcon(button, icon);
+		this.lifecycle.registerDomEvent(button, 'click', (evt: MouseEvent) => {
+			evt.preventDefault();
+			evt.stopPropagation();
+			run();
+		});
+		this.lifecycle.registerDomEvent(button, 'mousedown', (evt: MouseEvent) => {
+			evt.stopPropagation();
+		});
+		return button;
 	}
 
 	/** Re-renders in place. Used when snippets arrive after the card was first drawn. */
@@ -119,6 +195,16 @@ export class ResultCard {
 	setSelected(selected: boolean): void {
 		this.model = { ...this.model, selected };
 		this.applySelection();
+	}
+
+	/**
+	 * Paints the "kept" mark. A no-op on a card built without curation, which is
+	 * why the modal may call it unconditionally.
+	 */
+	setKept(kept: boolean): void {
+		this.el.toggleClass('sift-card--kept', kept);
+		this.keepEl?.toggleClass('sift-card__action--on', kept);
+		this.keepEl?.setAttr('aria-pressed', kept ? 'true' : 'false');
 	}
 
 	/**
@@ -225,12 +311,24 @@ export class ResultCard {
 	/**
 	 * The snippet area always exists, even with no snippets, so a card does not
 	 * change height when snippets arrive after the first paint.
+	 *
+	 * THE ONE EXCEPTION IS A HIT WITH NO MATCH
+	 * ----------------------------------------
+	 * A filter-only run — a date range or a folder and no search term — produces
+	 * hits whose `matches` list is empty, and an excerpt is built AROUND a match,
+	 * so those cards can never grow one. Reserving a blank line for an excerpt
+	 * that is not coming is not stability, it is a gap under the path that reads
+	 * as a rendering fault, so that one case drops the reservation. Everything
+	 * else keeps it: a card that HAS matches is only waiting for its file to be
+	 * read, and must not jump when the read lands.
 	 */
 	private renderSnippets(): void {
 		this.snippetsEl.empty();
 		for (const snippet of this.model.item.snippets) {
 			this.renderSnippet(snippet);
 		}
+		const unreachable = this.model.item.snippets.length === 0 && this.model.item.matches.length === 0;
+		this.snippetsEl.toggleClass('sift-card__snippets--blank', unreachable);
 	}
 
 	private renderSnippet(snippet: Snippet): void {

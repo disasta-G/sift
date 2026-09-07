@@ -459,8 +459,15 @@ export function scanDisplaySinks(file: string, source: string): Violation[] {
 	return violations;
 }
 
-/** A CSS class list: every word is a lower-case, dashed or underscored token. */
-const CSS_WORD = /^[a-z][a-z0-9]*(?:[-_]+[a-z0-9]+)+$/;
+/**
+ * A CSS class list: every word is a lower-case, dashed or underscored token.
+ *
+ * The trailing `[-_]*` is for a template literal cut open by an interpolation,
+ * as in `` `sift-card__action sift-card__action--${kind}` `` — its head ends
+ * mid-token, and without this a class list would read as two words and be
+ * reported as prose. It stays strict about what a word may contain.
+ */
+const CSS_WORD = /^[a-z][a-z0-9]*(?:[-_]+[a-z0-9]+)+[-_]*$/;
 
 /** Reads like language rather than like an identifier. */
 export function looksLikeProse(value: string): boolean {
@@ -547,6 +554,15 @@ describe('the scan itself', () => {
 		...scanDisplaySinks('probe.ts', source),
 		...scanProse('probe.ts', source),
 	];
+
+	it('does not read a class list as prose, interpolated or not', () => {
+		// Both are class lists, not language: the second is the head of a template
+		// literal whose last token is cut open by `${kind}`.
+		expect(scanBoth("el.addClass('sift-card sift-card--selected');")).toEqual([]);
+		expect(scanBoth("el.createEl('button', { cls: `sift-card__action sift-card__action--${kind}` });")).toEqual([]);
+		// A sentence that happens to contain a dash is still prose.
+		expect(scanBoth("buildHint(el, 'Open the note');").length).toBeGreaterThan(0);
+	});
 
 	it('accepts a t() call in every checked position', () => {
 		const source = [

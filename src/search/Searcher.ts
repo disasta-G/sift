@@ -54,6 +54,32 @@
  * split spelled out on {@link Match} and relied on by Snippets and Ranker.
  *
  * ---------------------------------------------------------------------------
+ * A SEARCH WITHOUT A TERM
+ * ---------------------------------------------------------------------------
+ * A date, a date range or a folder is a question on its own — "what did I write
+ * that week", "what is in this project" — so a query with no positive term but
+ * an active filter is a valid search and returns every file the filters let
+ * through, each with an EMPTY `matches` list. There is no term to look for, so
+ * the pass does no trigram work and reads no text: it walks the file records,
+ * applies {@link Searcher.passesFilters} and nothing else.
+ *
+ * Two rules keep that from turning into "dump the vault":
+ *
+ *  - an active filter is REQUIRED, see {@link hasActiveFilters}. Without one
+ *    there is no question, and the caller shows its empty state instead.
+ *  - a query of nothing but negations (`-altbau`) is NOT a search by itself. It
+ *    carries no filter, and "every note except those" is not something anyone
+ *    types on purpose — it would answer a stray `-` with the whole vault. With
+ *    a filter beside it the negation does apply, so `-altbau` plus a date range
+ *    is "that week, without the Altbau notes".
+ *
+ * Negations are verified against the file text exactly as on the normal path,
+ * NOT pre-filtered through the trigram candidates: alias postings for body
+ * words are incomplete for records restored from IndexedDB (see the Indexer
+ * header), and a missed candidate there would let an excluded file back INTO
+ * the result list rather than merely cost recall.
+ *
+ * ---------------------------------------------------------------------------
  * QUALITY
  * ---------------------------------------------------------------------------
  * A literal hit of `variants[0]` (the strip fold of what the user typed) is
@@ -110,6 +136,13 @@ const TRIGRAMS_PER_EDIT = 3;
 
 /** Badness order. `exact` is best, `fuzzy` worst; used for dedup preference and for {@link RawHit.quality}. */
 const QUALITY_RANK: Readonly<Record<MatchQuality, number>> = { exact: 0, alias: 1, fuzzy: 2 };
+
+/**
+ * The `matches` list of a hit found without a term. One shared frozen array
+ * rather than one per hit: a filter-only search over a large vault produces
+ * thousands of hits and none of them has anything to put in it.
+ */
+const NO_MATCHES: readonly Match[] = Object.freeze([]);
 
 /** Whitespace of the normalized text: real spaces, blanked markdown, and the line breaks that survive folding. */
 function isSpaceCode(code: number): boolean {
@@ -184,6 +217,33 @@ function intersectInto(working: Set<FileId>, other: ReadonlySet<FileId>): Set<Fi
 		if (!other.has(id)) working.delete(id);
 	}
 	return working;
+}
+
+/**
+ * Do these filters ask a question of their own?
+ *
+ * This is the predicate that decides whether an empty query still runs a search
+ * — the Searcher applies it (see the header) and the UI needs the same answer to
+ * choose between its empty state and a result list, so it lives here rather than
+ * being spelled out twice:
+ *
+ *   `!ast.isEmpty || hasActiveFilters(filters)`
+ *
+ * Two deliberate exclusions:
+ *
+ *  - `excludedFolders` never counts. It comes from the settings, not from the
+ *    filter bar; treating it as a filter would turn every empty query into a
+ *    listing of the whole vault for anyone who has ever excluded a folder.
+ *  - the vault ROOT with subfolders on never counts either — `folder: ''` plus
+ *    `includeSubfolders: true` selects everything, which is not a narrowing. The
+ *    same root WITHOUT subfolders does count: "only the notes lying loose at the
+ *    top" is a real question.
+ */
+export function hasActiveFilters(filters: SearchFilters): boolean {
+	if (filters.createdFrom !== null || filters.createdTo !== null) return true;
+	if (filters.modifiedFrom !== null || filters.modifiedTo !== null) return true;
+	if (filters.folder === null) return false;
+	return trimSlashes(filters.folder.trim()).length > 0 || !filters.includeSubfolders;
 }
 
 /** `path` is `folder` itself or sits under it. Segment-aware, so `Projekte` never swallows `Projekte2`. */
@@ -379,9 +439,12 @@ export class Searcher {
 
 	/** Synchronous by design so a search is one microtask; the caller debounces and passes an AbortSignal. */
 	search(ast: QueryAst, options: SearchOptions): RawHit[] {
-		if (ast.isEmpty) return [];
 		const signal = options.signal;
 		if (signal !== undefined && signal.aborted) return [];
+		// No positive term: the filters are the query. The branch tests what this
+		// method actually iterates rather than `ast.isEmpty`, which a hand-built
+		// AST could contradict.
+		if (ast.must.length === 0 && ast.should.length === 0) return this.searchByFilters(ast, options);
 
 		const fuzzy = options.fuzzy;
 		const termIndexOf = new Map<QueryTerm, number>();
@@ -477,6 +540,59 @@ export class Searcher {
 				modifiedAt: file.modifiedAt,
 				matches: finalized,
 				quality: worstQuality(finalized),
+			});
+		}
+		return hits;
+	}
+
+	/**
+	 * The term-less pass: every file the filters let through, with no matches.
+	 *
+	 * A scan over the file records and nothing else — no candidate step, no
+	 * trigram intersection, no text read — because there is no literal to look
+	 * for. That is what keeps a date-range-only search inside the search budget
+	 * on a large vault: the per-file cost is {@link Searcher.passesFilters}, a
+	 * handful of comparisons.
+	 *
+	 * `ast.mustNot` still applies, and it is verified against the file text the
+	 * same way the normal path does it; see the header for why the trigram
+	 * candidates must not be used to skip that check. Files the filters already
+	 * rejected are never verified, so `-altbau` with a folder filter reads only
+	 * the folder.
+	 */
+	private searchByFilters(ast: QueryAst, options: SearchOptions): RawHit[] {
+		// Filters alone are a search; negations alone are not. See the header.
+		if (!hasActiveFilters(options.filters)) return [];
+		const signal = options.signal;
+		const hits: RawHit[] = [];
+		let seen = 0;
+		for (const file of this.indexer.allFiles()) {
+			seen++;
+			if (signal !== undefined && (seen & (ABORT_CHECK_INTERVAL - 1)) === 0 && signal.aborted) return [];
+			if (!this.passesFilters(file, options.filters)) continue;
+
+			let excluded = false;
+			for (const term of ast.mustNot) {
+				// Never fuzzy: a near miss must not remove a file the user never typed.
+				if (this.verify(term, file, -1, false).length > 0) {
+					excluded = true;
+					break;
+				}
+			}
+			if (excluded) continue;
+
+			hits.push({
+				fileId: file.id,
+				path: file.path,
+				title: file.title,
+				folder: file.folder,
+				createdAt: file.createdAt,
+				modifiedAt: file.modifiedAt,
+				matches: NO_MATCHES,
+				// Nothing was matched, so nothing was approximated either. `exact`
+				// is what `worstQuality` reports for an empty list and it keeps the
+				// hit out of the Ranker's fuzzy tier.
+				quality: 'exact',
 			});
 		}
 		return hits;
