@@ -7,95 +7,205 @@
 		"allow": "The pressure valve. A rule that produces a legitimate hit gets an allow entry with a reason instead of a weakened pattern - a guard that cries wolf gets switched off. `file` is a glob; `match` is an optional case-insensitive substring of the matched text OR of the line it sits on, which is how an exception is tied to the sentence that makes it legitimate instead of to a line number that shifts with the next edit; `line` pins an exact line number. `note` is mandatory: an exception without a reason is a config error.",
 		"self-exclusion": "This rules file is never content-scanned; it would match its own patterns. It is still path-checked like every other tracked file."
 	},
-
-	"historyPaths": ["src/ai", "src/license", "backend", "PRIVACY.md"],
-	"historyAdvisoryPaths": ["docs/mockup-trial-expired.html", "docs/mockup-trial-expired.png"],
-	"requiredGitignore": [".env", ".env.*", "node_modules/", "main.js", "data.json"],
+	"historyPaths": [
+		"src/ai",
+		"src/license",
+		"backend",
+		"PRIVACY.md"
+	],
+	"historyAdvisoryPaths": [
+		"docs/mockup-trial-expired.html",
+		"docs/mockup-trial-expired.png"
+	],
+	"requiredGitignore": [
+		".env",
+		".env.*",
+		"node_modules/",
+		"main.js",
+		"data.json"
+	],
 	"packageJsonNoRuntimeDeps": true,
-	"extraScanTargets": ["main.js"],
-
+	"extraScanTargets": [
+		"main.js"
+	],
 	"release": {
 		"descriptionMinLength": 10,
 		"descriptionMaxLength": 250,
 		"mainJsMinLines": 200,
-		"requiredFiles": ["README.md", "LICENSE", "manifest.json", "styles.css"],
-		"manifestRequiredKeys": ["id", "name", "version", "minAppVersion", "description", "author", "isDesktopOnly"],
-		"manifestOptionalKeys": ["authorUrl", "fundingUrl"],
+		"requiredFiles": [
+			"README.md",
+			"LICENSE",
+			"manifest.json",
+			"styles.css"
+		],
+		"manifestRequiredKeys": [
+			"id",
+			"name",
+			"version",
+			"minAppVersion",
+			"description",
+			"author",
+			"isDesktopOnly"
+		],
+		"manifestOptionalKeys": [
+			"authorUrl",
+			"fundingUrl"
+		],
 		"descriptionVerbs": [
-			"add", "browse", "build", "collect", "compare", "convert", "copy", "create", "display",
-			"edit", "explore", "export", "extract", "filter", "find", "format", "generate", "group",
-			"highlight", "import", "index", "insert", "jump", "keep", "link", "list", "locate",
-			"manage", "match", "merge", "navigate", "open", "organize", "preview", "query", "rank",
-			"read", "render", "replace", "reveal", "run", "save", "scan", "search", "send", "set",
-			"show", "sort", "split", "store", "style", "sync", "toggle", "track", "translate",
-			"turn", "update", "view", "visualize", "write"
+			"add",
+			"browse",
+			"build",
+			"collect",
+			"compare",
+			"convert",
+			"copy",
+			"create",
+			"display",
+			"edit",
+			"explore",
+			"export",
+			"extract",
+			"filter",
+			"find",
+			"format",
+			"generate",
+			"group",
+			"highlight",
+			"import",
+			"index",
+			"insert",
+			"jump",
+			"keep",
+			"link",
+			"list",
+			"locate",
+			"manage",
+			"match",
+			"merge",
+			"navigate",
+			"open",
+			"organize",
+			"preview",
+			"query",
+			"rank",
+			"read",
+			"render",
+			"replace",
+			"reveal",
+			"run",
+			"save",
+			"scan",
+			"search",
+			"send",
+			"set",
+			"show",
+			"sort",
+			"split",
+			"store",
+			"style",
+			"sync",
+			"toggle",
+			"track",
+			"translate",
+			"turn",
+			"update",
+			"view",
+			"visualize",
+			"write"
 		]
 	},
-
 	"rules": [
 		{
 			"id": "SCOPE-AI-DIR",
-			"why": "src/ai/ is the v1.1 client for the paid suggestion service. In a repo whose v1.0 README discloses no network use, an AI client directory is the clearest contradiction a reviewer can find.",
+			"why": "src/ai/ belongs to a later release. This one ships a search that runs entirely on the device and contacts no server, and a client for a remote service inside it contradicts both the README and the build.",
 			"kind": "path",
-			"glob": ["src/ai/**"]
+			"glob": [
+				"src/ai/**"
+			]
 		},
 		{
 			"id": "SCOPE-LICENSE-DIR",
-			"why": "src/license/ holds licence activation, device ids and token storage. Its presence implies an undisclosed paid tier, which store policy requires the README to document.",
+			"why": "src/license/ belongs to a later release. Entitlement code in a repository whose release gates nothing reads as a feature the description does not cover.",
 			"kind": "path",
-			"glob": ["src/license/**"]
+			"glob": [
+				"src/license/**"
+			]
 		},
 		{
 			"id": "SCOPE-PAYWALL-VIEW",
-			"why": "AiSection.ts, RelatedMatches.ts, UpgradeCard.ts, TrialBanner.ts and LicenseModal.ts sit next to the Phase-1 views in the plan, so they are the files most likely to be created by accident while building the overlay from the same mockups.",
+			"why": "These view files belong to a later release and sit next to the ones this release does ship, which makes them the likeliest to be created here by accident.",
 			"kind": "path",
 			"pattern": "^src/(?:.*/)?(?:(?:[Aa][Ii]|[Rr]elated|[Uu]pgrade|[Tt]rial|[Ll]icen[cs]e|[Pp]aywall|[Pp]remium|[Qq]uota|[Bb]illing)[A-Za-z]*|[A-Za-z0-9]*[a-z0-9](?:AI|Ai|Related|Upgrade|Trial|Licen[cs]e|Paywall|Premium|Quota|Billing)[A-Za-z]*)\\.tsx?$"
 		},
 		{
 			"id": "SCOPE-BACKEND-DIR",
-			"why": "backend/ is the Cloudflare Worker: routes, licence provider, prompt and JWT signing. It is the paid infrastructure and belongs in the private repo until v1.0 is accepted.",
+			"why": "backend/ is a separate deployable and belongs to a later release. It is not part of the plugin and must not travel with it.",
 			"kind": "path",
-			"glob": ["backend/**"]
+			"glob": [
+				"backend/**"
+			]
 		},
 		{
 			"id": "SCOPE-WRANGLER-FILE",
-			"why": "Wrangler configuration names the Worker even without backend/. .dev.vars is wrangler's local secrets file and is the classic accidental commit.",
+			"why": "A deployment configuration names infrastructure this release does not have, and .dev.vars is a local secrets file — the classic accidental commit.",
 			"kind": "path",
-			"glob": ["**/wrangler.toml", "**/wrangler.json", "**/wrangler.jsonc", "**/.dev.vars", "**/.dev.vars.*", ".wrangler/**"]
+			"glob": [
+				"**/wrangler.toml",
+				"**/wrangler.json",
+				"**/wrangler.jsonc",
+				"**/.dev.vars",
+				"**/.dev.vars.*",
+				".wrangler/**"
+			]
 		},
 		{
 			"id": "SECRET-ENV-FILE",
 			"why": "The submitted repo has to be public, so a committed environment or secrets file is an immediate live-key leak, not a hygiene warning.",
 			"kind": "path",
-			"glob": ["**/.env", "**/.env.*", "**/*.secrets.*", "**/secrets.json"]
+			"glob": [
+				"**/.env",
+				"**/.env.*",
+				"**/*.secrets.*",
+				"**/secrets.json"
+			]
 		},
 		{
 			"id": "STORE-VAULT-STATE",
-			"why": "data.json is the plugin's own settings file inside a vault and later carries the licence key and device id; .obsidian/ is a committed test vault's config. Neither belongs in the repo.",
+			"why": "data.json is the plugin's own settings file from inside somebody's vault, and .obsidian/ is a vault configuration. Neither is source, and both carry whatever the machine they came from had in them.",
 			"kind": "path",
-			"glob": ["**/data.json", "**/.obsidian/**"]
+			"glob": [
+				"**/data.json",
+				"**/.obsidian/**"
+			]
 		},
 		{
 			"id": "SCOPE-TRIAL-MOCKUP",
-			"why": "docs/mockup-trial-expired.* is a rendered paywall - expired trial, price, activate button, licence key field. The PNG cannot be grepped, which is why this is a path rule.",
+			"why": "This mockup shows an interface state that no released build can reach. It is a design file for a later release, and being an image it cannot be grepped — hence a path rule.",
 			"kind": "path",
-			"glob": ["docs/mockup-trial-expired.*"]
+			"glob": [
+				"docs/mockup-trial-expired.*"
+			]
 		},
 		{
 			"id": "SCOPE-PRIVACY-DOC",
 			"why": "A privacy policy describing outbound data and LLM providers, in a release that sends nothing, is self-incriminating and inconsistent with the v1.0 README.",
 			"kind": "path",
-			"glob": ["PRIVACY.md", "docs/PRIVACY.md"]
+			"glob": [
+				"PRIVACY.md",
+				"docs/PRIVACY.md"
+			]
 		},
 		{
 			"id": "SCOPE-BETA-MANIFEST",
-			"why": "A beta manifest published for testers of the AI build advertises the unreleased paid version from inside the submitted repo.",
+			"why": "A second manifest published for testers advertises an unreleased build from inside the repository the directory reviews.",
 			"kind": "path",
-			"glob": ["manifest-beta.json"]
+			"glob": [
+				"manifest-beta.json"
+			]
 		},
 		{
 			"id": "SCOPE-PAID-TEST-FILE",
-			"why": "Tests are tracked files. A mocked suggestion or activation response describes the paid API as precisely as the client would.",
+			"why": "Tests are tracked files. A fixture for a service this release does not call describes that service as precisely as the client would.",
 			"kind": "path",
 			"pattern": "^test/(?:.*/)?[A-Za-z0-9_.-]*(?:^|[/_.-])(?:ai|licen[cs]e|trial|polar|worker)[A-Za-z0-9_.-]*\\.(?:ts|json|md)$",
 			"flags": "i"
@@ -104,12 +214,13 @@
 			"id": "BUILD-NODE-MODULES",
 			"why": "node_modules must never be tracked; the build has to be reproducible from package-lock.json alone.",
 			"kind": "path",
-			"glob": ["node_modules/**"]
+			"glob": [
+				"node_modules/**"
+			]
 		},
-
 		{
 			"id": "SECRET-WORKER-KEY-NAME",
-			"why": "Even as a placeholder or in a comment, these names prove a paid backend exists and that the plugin is expected to talk to an LLM provider.",
+			"why": "These are the names of provider credentials. Even as a placeholder or in a comment they imply the plugin is expected to authenticate somewhere, which this release never does — and a real one must never be committed at all.",
 			"kind": "content",
 			"pattern": "(?:OPENAI|MISTRAL|ANTHROPIC)_API_KEY|JWT_SECRET|MOR_WEBHOOK_SECRET|TRIAL_EMAIL_SALT|LLM_KEYS",
 			"allow": [
@@ -127,7 +238,7 @@
 		},
 		{
 			"id": "SCOPE-BACKEND-ROUTE",
-			"why": "Route strings survive deletion of the client code - in constants, tests, comments or translations - and name the paid API precisely.",
+			"why": "Route strings outlive the code that called them, in constants, tests, comments and translations, and each one names an endpoint this release does not talk to.",
 			"kind": "content",
 			"pattern": "/v1/(?:ai|licen[cs]e|token|trial)|/webhooks/mor"
 		},
@@ -139,11 +250,18 @@
 		},
 		{
 			"id": "SCOPE-SHOP-URL",
-			"why": "A checkout, billing or pricing URL anywhere in the shipped files forces the Pricing disclosure the v1.0 release does not have.",
+			"why": "A checkout or billing address anywhere in the shipped files points at something this release does not have, and asks for a disclosure it has nothing to fill in.",
 			"kind": "content",
 			"pattern": "https?://[^\\s\"')]*/(?:checkout|billing|portal|pricing|subscribe)",
 			"flags": "i",
-			"targets": ["src/**", "styles.css", "manifest.json", "README.md", "package.json", "main.js"]
+			"targets": [
+				"src/**",
+				"styles.css",
+				"manifest.json",
+				"README.md",
+				"package.json",
+				"main.js"
+			]
 		},
 		{
 			"id": "NET-NETWORK-CALL",
@@ -151,7 +269,10 @@
 			"kind": "content",
 			"pattern": "requestUrl\\s*\\(|(?:^|[^.\\w])fetch\\s*\\(|XMLHttpRequest|new WebSocket|EventSource\\s*\\(|sendBeacon",
 			"flags": "m",
-			"targets": ["src/**", "main.js"]
+			"targets": [
+				"src/**",
+				"main.js"
+			]
 		},
 		{
 			"id": "TELEMETRY-SDK",
@@ -159,7 +280,14 @@
 			"kind": "content",
 			"pattern": "sentry|posthog|mixpanel|amplitude|plausible|umami|matomo|bugsnag|google-analytics|gtag\\s*\\(|segment\\.com|telemetry|analytics",
 			"flags": "i",
-			"targets": ["src/**", "styles.css", "manifest.json", "package.json", "package-lock.json", "main.js"],
+			"targets": [
+				"src/**",
+				"styles.css",
+				"manifest.json",
+				"package.json",
+				"package-lock.json",
+				"main.js"
+			],
 			"allow": [
 				{
 					"file": "package-lock.json",
@@ -173,7 +301,9 @@
 			"why": "No logging of search terms or note content, not even locally: in an unminified bundle a debug log in the searcher is indistinguishable from telemetry. console.error in a genuine error path is the only exception and is recorded here as an allow entry.",
 			"kind": "content",
 			"pattern": "console\\.(?:log|info|debug|warn|trace|table|dir)\\s*\\(",
-			"targets": ["src/**"]
+			"targets": [
+				"src/**"
+			]
 		},
 		{
 			"id": "SEC-UNSAFE-DOM",
@@ -181,7 +311,10 @@
 			"kind": "content",
 			"pattern": "\\.innerHTML|\\.outerHTML|insertAdjacentHTML|document\\.writeln?\\s*\\(|(?:^|[^.\\w])eval\\s*\\(|new Function\\s*\\(",
 			"flags": "m",
-			"targets": ["src/**", "main.js"]
+			"targets": [
+				"src/**",
+				"main.js"
+			]
 		},
 		{
 			"id": "MOBILE-NODE-API",
@@ -189,63 +322,124 @@
 			"kind": "content",
 			"pattern": "(?:^|[^.\\w])require\\s*\\(|from\\s*['\"](?:node:)?(?:fs|path|os|child_process|crypto|http|https|net|util|stream|zlib|url|worker_threads|events|buffer)['\"]|from\\s*['\"]electron['\"]|@electron/remote|ipcRenderer|(?:^|[^.\\w])process\\.(?:env|platform|cwd)",
 			"flags": "m",
-			"targets": ["src/**"]
+			"targets": [
+				"src/**"
+			]
 		},
 		{
 			"id": "STYLE-HARDCODED-COLOR",
 			"why": "Only Obsidian CSS variables may decide colour; a literal colour breaks every theme that is not the one it was written against.",
 			"kind": "content",
 			"pattern": "#[0-9a-fA-F]{3,8}\\b|\\brgba?\\(|\\bhsla?\\(",
-			"targets": ["styles.css"]
+			"targets": [
+				"styles.css"
+			]
 		},
 		{
 			"id": "CMD-DEFAULT-HOTKEY",
 			"why": "A default hotkey collides with the user's own bindings and with core commands; the guideline is to register none.",
 			"kind": "content",
 			"pattern": "hotkeys\\s*:",
-			"targets": ["src/**"]
+			"targets": [
+				"src/**"
+			]
 		},
 		{
 			"id": "DEPS-FORBIDDEN-PACKAGE",
-			"why": "devDependencies are read too: wrangler or miniflare there advertises the Worker even with no backend/ folder, and an HTTP client contradicts the zero-network claim.",
+			"why": "devDependencies are read too. A deployment tool or an HTTP client there implies infrastructure and network use that this release does not have.",
 			"kind": "content",
 			"pattern": "\"(?:hono|wrangler|miniflare|@polar-sh/[a-z-]+|openai|@anthropic-ai/[a-z-]+|@mistralai/[a-z-]+|jose|jsonwebtoken|zod|itty-router|axios|superagent|got|ofetch|ky|node-fetch)\"",
-			"targets": ["package.json", "package-lock.json"]
+			"targets": [
+				"package.json",
+				"package-lock.json"
+			]
 		},
 		{
 			"id": "DEPS-WORKER-SCRIPT",
 			"why": "A deploy script or a workspace entry names infrastructure that must not exist on this branch, and it survives long after backend/ was deleted.",
 			"kind": "content",
 			"pattern": "wrangler|workers\\.dev|\"workspaces\"|deploy:(?:worker|backend)|OPENAI|ANTHROPIC|MISTRAL|POLAR_|JWT_SECRET",
-			"targets": ["package.json", ".github/workflows/**"]
+			"targets": [
+				"package.json",
+				".github/workflows/**"
+			]
 		},
 		{
 			"id": "SCOPE-PAID-VOCAB",
-			"why": "The vocabulary of the paid tier. UI code gets deleted, the words stay behind in a comment, a class name or a settings label - and they read as an undisclosed paid feature.",
+			"why": "Vocabulary outlives the code it described. A view gets deleted and the words stay behind in a comment, a class name or a translation key, where they read as a feature the description does not cover.",
 			"kind": "content",
 			"pattern": "licen[cs]e|\\btrial|paywall|\\bpremium|\\bupgrade|monetari[sz]|abonnement",
 			"flags": "i",
-			"targets": ["src/**", "styles.css", "manifest.json", "README.md", "package.json", "package-lock.json", "LICENSE", "test/**", "main.js"],
+			"targets": [
+				"src/**",
+				"styles.css",
+				"manifest.json",
+				"README.md",
+				"package.json",
+				"package-lock.json",
+				"LICENSE",
+				"test/**",
+				"main.js"
+			],
 			"allow": [
-				{ "file": "LICENSE", "note": "The MIT licence text itself. A LICENSE file at repo root is required by the developer policies." },
-				{ "file": "package.json", "match": "license", "note": "The npm `license: MIT` field, which must match the LICENSE file." },
-				{ "file": "package-lock.json", "match": "license", "note": "npm records the licence of every dependency in the lockfile." },
-				{ "file": "README.md", "match": "licen", "note": "The README's licence section (MIT), required by the submission checklist." },
-				{ "file": "test/fixtures/**", "note": "The fixture vault generator writes German and English prose as note content; a word like 'Trial' there is vault text, not plugin code." },
-				{ "file": "test/**", "note": "Several test files run this same policy scan from inside vitest and therefore carry the forbidden vocabulary as test data. Tests are not part of the release. The sharp rules - backend routes, provider hosts, key material, paid file names - still apply to test/ unchanged." },
-				{ "file": "src/**", "match": "no license", "note": "A line that DENIES the paid part ('Phase 1 scope: local search only. No AI, no license, no backend, no network.' in src/types.ts) is a scope statement. A reviewer reading the unminified bundle sees the same sentence and it reads correctly." }
+				{
+					"file": "LICENSE",
+					"note": "The MIT licence text itself. A LICENSE file at repo root is required by the developer policies."
+				},
+				{
+					"file": "package.json",
+					"match": "license",
+					"note": "The npm `license: MIT` field, which must match the LICENSE file."
+				},
+				{
+					"file": "package-lock.json",
+					"match": "license",
+					"note": "npm records the licence of every dependency in the lockfile."
+				},
+				{
+					"file": "README.md",
+					"match": "licen",
+					"note": "The README's licence section (MIT), required by the submission checklist."
+				},
+				{
+					"file": "test/fixtures/**",
+					"note": "The fixture vault generator writes German and English prose as note content; a word like 'Trial' there is vault text, not plugin code."
+				},
+				{
+					"file": "test/**",
+					"note": "Several test files run this same policy scan from inside vitest and therefore carry the forbidden vocabulary as test data. Tests are not part of the release. The sharp rules - backend routes, provider hosts, key material, paid file names - still apply to test/ unchanged."
+				},
+				{
+					"file": "src/**",
+					"match": "no license",
+					"note": "A line that DENIES the paid part ('Phase 1 scope: local search only. No AI, no license, no backend, no network.' in src/types.ts) is a scope statement. A reviewer reading the unminified bundle sees the same sentence and it reads correctly."
+				}
 			]
 		},
 		{
 			"id": "SCOPE-AI-VOCAB",
-			"why": "An AI mention anywhere in the shipped files, in either language, forces the Pricing and Network-use README sections that the v1.0 release deliberately does not need.",
+			"why": "A mention of a language model anywhere in the shipped files, in either language, describes behaviour this release does not have and asks for a network disclosure it does not need.",
 			"kind": "content",
 			"pattern": "\\bAI\\b|\\bKI\\b|\\bGPT|\\bLLM\\b|OpenAI|Anthropic|Mistral|related matches|verwandte begriffe|sift ai|ki-vorschlag|ki (?:heute|inaktiv)|via espressomaschine",
 			"flags": "i",
-			"targets": ["src/**", "styles.css", "manifest.json", "README.md", "test/**", "main.js"],
+			"targets": [
+				"src/**",
+				"styles.css",
+				"manifest.json",
+				"README.md",
+				"test/**",
+				"main.js"
+			],
 			"allow": [
-				{ "file": "test/**", "note": "Several test files run this same policy scan from inside vitest and therefore carry the forbidden vocabulary as test data. Tests are not part of the release, and the sharp rules still apply to test/ unchanged." },
-				{ "file": "src/**", "match": "no ai", "note": "A line that DENIES the AI part ('Phase 1 scope: local search only. No AI, no license, no backend, no network.' in src/types.ts) is a scope statement, not an announcement, and reads correctly in the shipped bundle too." }
+				{
+					"file": "test/**",
+					"note": "Several test files run this same policy scan from inside vitest and therefore carry the forbidden vocabulary as test data. Tests are not part of the release, and the sharp rules still apply to test/ unchanged."
+				},
+				{
+					"file": "src/**",
+					"match": "no ai",
+					"note": "A line that DENIES the AI part ('Phase 1 scope: local search only. No AI, no license, no backend, no network.' in src/types.ts) is a scope statement, not an announcement, and reads correctly in the shipped bundle too."
+				}
 			]
 		},
 		{
@@ -254,7 +448,11 @@
 			"kind": "content",
 			"pattern": "\\.sift-(?:ai|related|chip|upgrade|trial|licen[cs]e|quota|paywall|locked|premium|pro)\\b",
 			"flags": "i",
-			"targets": ["styles.css", "src/**", "main.js"],
+			"targets": [
+				"styles.css",
+				"src/**",
+				"main.js"
+			],
 			"allow": [
 				{
 					"file": "styles.css",
@@ -268,7 +466,9 @@
 			"why": "A single leftover field in DEFAULT_SETTINGS ends up in every user's data.json and in the settings tab.",
 			"kind": "content",
 			"pattern": "\\b(?:aiEnabled|aiOptIn[A-Za-z]*|licen[cs]eKey|deviceId|trialExpires[A-Za-z]*|quotaUsed|authToken|jwt)\\s*[:?=]",
-			"targets": ["src/**"]
+			"targets": [
+				"src/**"
+			]
 		},
 		{
 			"id": "SCOPE-AI-COMMAND",
@@ -276,22 +476,30 @@
 			"kind": "content",
 			"pattern": "addCommand[\\s\\S]{0,200}?(?:licen[cs]e|\\btrial|upgrade|activate)",
 			"flags": "i",
-			"targets": ["src/**"]
+			"targets": [
+				"src/**"
+			]
 		},
 		{
 			"id": "SCOPE-FEATURE-FLAG",
 			"why": "A flag makes the AI code look harmless to its author while it still sits in the repo and in the bundle. A disabled feature is a shipped feature for the reviewer.",
 			"kind": "content",
 			"pattern": "ENABLE_AI|FEATURE_AI|SIFT_AI|__AI__|if\\s*\\(\\s*false\\s*\\)|\\bdefine\\s*:\\s*\\{",
-			"targets": ["src/**", "esbuild.config.mjs"]
+			"targets": [
+				"src/**",
+				"esbuild.config.mjs"
+			]
 		},
 		{
 			"id": "SCOPE-PAID-TODO",
-			"why": "Comments are not stripped from an unminified build - which the store requires - so a TODO about the worker reads as a public roadmap of undisclosed paid features.",
+			"why": "The store requires an unminified build, so comments ship. A note about work planned for a later release therefore becomes a public roadmap inside the shipped file.",
 			"kind": "content",
 			"pattern": "(?:TODO|FIXME|XXX|HACK|NOTE)[^\\n]{0,100}(?:\\bAI\\b|\\bKI\\b|licen[cs]e|\\btrial|paywall|upgrade|polar|worker|backend|v1\\.1)",
 			"flags": "i",
-			"targets": ["src/**", "styles.css"]
+			"targets": [
+				"src/**",
+				"styles.css"
+			]
 		},
 		{
 			"id": "SCOPE-AI-I18N-KEY",
@@ -299,15 +507,19 @@
 			"kind": "content",
 			"pattern": "\"(?:ai|ki|licen[cs]e|trial|upgrade|quota|billing|subscription|related|premium)(?:[._-][a-zA-Z]*)?\"\\s*:",
 			"flags": "i",
-			"targets": ["src/i18n/*.json"]
+			"targets": [
+				"src/i18n/*.json"
+			]
 		},
 		{
 			"id": "SCOPE-README-PAID-SECTION",
-			"why": "These sections belong to the release that actually ships the paid feature. On this branch they either describe something the build does not do or promise a tier that does not exist.",
+			"why": "These README sections belong to the release that actually ships what they disclose. Here they would describe behaviour the build does not have.",
 			"kind": "content",
 			"pattern": "^#{1,4}\\s*(?:pricing|preise|network use|privacy|subscription|upgrade|ai)\\b|coming soon|demn[äa]chst",
 			"flags": "im",
-			"targets": ["README.md"],
+			"targets": [
+				"README.md"
+			],
 			"allow": [
 				{
 					"file": "README.md",
@@ -322,22 +534,37 @@
 			"kind": "content",
 			"pattern": "M12 3l1\\.8 5\\.2|sparkles?|magic-wand|wand-2",
 			"flags": "i",
-			"targets": ["src/**", "styles.css", "main.js"]
+			"targets": [
+				"src/**",
+				"styles.css",
+				"main.js"
+			]
 		},
 		{
 			"id": "SCOPE-PRICING-STRING",
-			"why": "Price, plan and quota text anywhere in the repo forces the Pricing disclosure; the quota counter is copied straight from the dark mockup's footer.",
+			"why": "Commercial text anywhere in the repository asks for a disclosure this release has nothing to disclose, and invites a question the build cannot answer.",
 			"kind": "content",
 			"pattern": "(?:\\$|USD\\s?)(?:5|45)\\b|\\b(?:5|45)\\s?USD\\b|pro (?:Monat|Jahr)\\b|per (?:month|year)\\b|fair.?use|\\b\\d+\\s?/\\s?100\\b",
 			"flags": "i",
-			"targets": ["src/**", "styles.css", "README.md", "manifest.json", "main.js", "docs/mockup-dark.html", "docs/mockup-light.html"]
+			"targets": [
+				"src/**",
+				"styles.css",
+				"README.md",
+				"manifest.json",
+				"main.js",
+				"docs/mockup-dark.html",
+				"docs/mockup-light.html"
+			]
 		},
 		{
 			"id": "BUILD-MINIFY",
 			"why": "Obfuscation is a hard rejection and minification without a sourcemap is treated as obfuscation. The build must stay readable.",
 			"kind": "content",
 			"pattern": "minify\\s*:\\s*true|--minify",
-			"targets": ["esbuild.config.mjs", "package.json"]
+			"targets": [
+				"esbuild.config.mjs",
+				"package.json"
+			]
 		},
 		{
 			"id": "MANIFEST-FORBIDDEN-VALUE",
@@ -345,7 +572,9 @@
 			"kind": "content",
 			"pattern": "\"isDesktopOnly\"\\s*:\\s*true|\"(?:name|id)\"\\s*:\\s*\"[^\"]*(?:obsidian|plugin)|\"(?:name|description)\"\\s*:\\s*\"[^\"]*(?:\\bAI\\b|\\bKI\\b|GPT|LLM|premium|subscription|trial)",
 			"flags": "i",
-			"targets": ["manifest.json"]
+			"targets": [
+				"manifest.json"
+			]
 		},
 		{
 			"id": "MANIFEST-FUNDING-URL",
@@ -353,23 +582,31 @@
 			"kind": "content",
 			"pattern": "\"fundingUrl\"\\s*:\\s*\"[^\"]*(?:polar|checkout|pricing|subscribe|buy|store|shop)",
 			"flags": "i",
-			"targets": ["manifest.json"]
+			"targets": [
+				"manifest.json"
+			]
 		},
 		{
 			"id": "SCOPE-PLAN-DOC",
-			"why": "docs/plan.md carries the whole business plan for an undisclosed paid tier - pricing, provider, licence flow, worker secrets - in the repo the reviewer clones. It belongs in the private repo; this is a decision for the owner, not something the guard should fix.",
+			"why": "A planning document for later releases is not part of what this one ships, and the directory reviews the whole repository rather than the release. It belongs wherever the rest of that planning lives.",
 			"kind": "content",
 			"pattern": "polar|monetarisierung|\\bUSD\\b|lizenzschl|gpt-[0-9.]+|wrangler|OPENAI_API_KEY|preisgestaltung",
 			"flags": "i",
-			"targets": ["docs/plan.md"]
+			"targets": [
+				"docs/plan.md"
+			]
 		},
 		{
 			"id": "SCOPE-PAID-ANNOUNCEMENT",
-			"why": "These files sit at repo root and are among the first a curious reviewer opens. A sentence announcing the paid part there does the same damage as the code would.",
+			"why": "These files sit at the repository root and are among the first anyone opens. A sentence there about work outside this release does the same damage as the code would.",
 			"kind": "content",
 			"pattern": "bezahlt|kostenpflichtig|monetarisierung|\\babo\\b|abonnement|\\bpaid\\b",
 			"flags": "i",
-			"targets": ["CLAUDE.md", "HANDOFF.md", "README.md"]
+			"targets": [
+				"CLAUDE.md",
+				"HANDOFF.md",
+				"README.md"
+			]
 		},
 		{
 			"id": "SCOPE-MOCKUP-AI-BLOCK",
@@ -377,7 +614,10 @@
 			"kind": "content",
 			"pattern": "verwandte begriffe|ki-vorschlag|via espressomaschine|ki (?:heute|inaktiv)|sift ai|\\bKI\\b",
 			"flags": "i",
-			"targets": ["docs/mockup-dark.html", "docs/mockup-light.html"]
+			"targets": [
+				"docs/mockup-dark.html",
+				"docs/mockup-light.html"
+			]
 		}
 	]
 }

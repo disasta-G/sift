@@ -76,13 +76,12 @@ Each chip can be removed individually; nothing is remembered between two searche
 | Language | Interface language: automatic, English or German. |
 | Similar matching by default | Starts every search with the "Similar" toggle switched on. |
 | Include subfolders by default | Starts every search with the subfolders of the chosen folder included. |
-| Highlight the selected result | Scales the selected card slightly; turn it off if text looks soft on your screen. |
 | Maximum results | Upper limit of results shown per search. |
 | Rebuild index | Reads every note again. Needed after changing the excluded folders or the created date field. The settings tab also shows how many notes are indexed and roughly how much memory the index uses. |
 
 ## Privacy and network use
 
-- **Sift makes no network requests.** There is no `fetch`, no `XMLHttpRequest`, no `WebSocket`, no `requestUrl` and no `sendBeacon` anywhere in the source. The plugin has no remote counterpart of any kind.
+- **Sift makes no network requests.** There is no `fetch`, no `XMLHttpRequest`, no `WebSocket`, no `requestUrl` and no `sendBeacon` anywhere in `src/` or in the shipped `main.js`. The plugin has no remote counterpart of any kind. (The static mockups under `docs/` and the development preview under `dev/` load a web font when you open them in a browser. Neither is part of the plugin and neither is ever loaded by it.)
 - **Sift collects no telemetry.** No analytics, no crash reporting, no usage counters, no ping on startup. Your search terms are never logged — not to a file, not to the developer console.
 - **Your note content never leaves your device.** Reading, indexing, searching and building excerpts all happen inside Obsidian.
 - **Where the index lives.** Sift stores its index in the browser's IndexedDB inside Obsidian's own app storage for that vault, keyed by the vault id, so two vaults on the same machine never share an index. Nothing is written into your vault itself except the plugin's own `data.json`, which holds your settings and nothing else. The index is derived data: "Rebuild index" in the settings discards it and reads your notes again, and a stored index is thrown away automatically when it no longer matches the vault or your settings.
@@ -155,16 +154,3 @@ Please open an issue using the bug report form. It deliberately does not ask for
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
-
----
-
-## Before submission
-
-Everything above describes the plugin as it stands. This last section is a maintainer checklist and not part of the description: it lists what still has to happen before Sift is offered to the community directory.
-
-- **Record the screenshots.** None exist in the repository yet. Five images go under `docs/`, and a Screenshots section linking them belongs directly under the introduction:
-  - `docs/screenshot-overlay-dark.png` — the search overlay in a dark theme, query typed, several result cards with highlighted excerpts visible.
-  - `docs/screenshot-overlay-light.png` — the same overlay in a light theme, to show that no colour is hardcoded.
-  - `docs/screenshot-filters.png` — the filter bar expanded: folder picker, "Include subfolders", the created-date range and the sort dropdown.
-  - `docs/screenshot-settings.png` — the settings tab, including the index statistics line and the "Rebuild index" button.
-  - `docs/screenshot-indexing.png` — the empty state shown while the index is still being built.

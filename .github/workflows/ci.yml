@@ -8,9 +8,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
 permissions:
   contents: read
@@ -41,7 +41,7 @@ jobs:
         run: npm ci
 
       - name: Scope guard
-        run: npm run guard
+        run: npm run guard:release
 
       - name: Typecheck
         run: npm run typecheck
@@ -166,4 +166,4 @@ jobs:
       - name: Scope guard on the built bundle
         # The bundle is what actually ships: a flagged-off branch or an inlined
         # translation block can carry strings the sources no longer show.
-        run: npm run guard
+        run: npm run guard:release

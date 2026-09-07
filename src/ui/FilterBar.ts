@@ -745,9 +745,11 @@ export class FilterBar {
 
 	/** The day a pointer event landed on, or `null` when it missed every cell. */
 	private dayOfEvent(evt: Event): Millis | null {
-		const target = evt.target;
-		if (!(target instanceof HTMLElement)) return null;
-		const cell = target.closest('.sift-cal__day');
+		// Cross-window safe; see the note in popoverBounds(). The predicate has to
+		// narrow a variable of its own, so the event target is bound first.
+		const node = evt.target as Node | null;
+		if (node === null || !node.instanceOf(HTMLElement)) return null;
+		const cell = node.closest('.sift-cal__day');
 		return this.dayCells.find((entry) => entry.el === cell)?.day ?? null;
 	}
 
@@ -1086,7 +1088,10 @@ export class FilterBar {
 	/** The box the popover may not leave: the modal panel, which is what clips it. */
 	private popoverBounds(): { left: number; right: number } | null {
 		const modal = this.el.closest('.sift-modal');
-		const box = modal instanceof HTMLElement ? modal : this.el;
+		// `instanceOf` rather than `instanceof`: in a popped-out window the element
+		// belongs to another realm, where the bare operator is false for a real
+		// HTMLElement and the popover would be measured against the wrong box.
+		const box = modal !== null && modal.instanceOf(HTMLElement) ? modal : this.el;
 		const rect = box.getBoundingClientRect();
 		return rect.width > 0 ? { left: rect.left, right: rect.right } : null;
 	}

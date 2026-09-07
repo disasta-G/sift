@@ -228,7 +228,8 @@ export class ResultCard {
 	 */
 	scrollIntoViewIfNeeded(): void {
 		const scroller = this.el.closest('.sift-results');
-		if (!(scroller instanceof HTMLElement)) return;
+		// Cross-window safe; see the note in FilterBar.popoverBounds().
+		if (scroller === null || !scroller.instanceOf(HTMLElement)) return;
 		const viewport = scroller.clientHeight;
 		if (viewport <= 0) return;
 

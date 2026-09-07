@@ -223,6 +223,19 @@ export function installDomHelpers(): void {
 
 	/* --- Node --- */
 
+	/**
+	 * Obsidian's cross-window-capable stand-in for `instanceof`. Inside a popped
+	 * out window the element belongs to a different realm, where the bare
+	 * operator compares against the wrong constructor; `instanceOf` compares
+	 * against the constructor of the node's OWN window. Plugin code is expected
+	 * to use it, so the stub has to have it or every such call throws here.
+	 */
+	nodeProto.instanceOf = function <T>(this: Node, type: new () => T): boolean {
+		const view = (this.ownerDocument ?? (this as unknown as Document)).defaultView;
+		const ctor = view === null || view === undefined ? type : ((view as unknown as Record<string, unknown>)[type.name] ?? type);
+		return this instanceof (ctor as new () => T);
+	};
+
 	nodeProto.createEl = function (
 		this: Node,
 		tag: string,

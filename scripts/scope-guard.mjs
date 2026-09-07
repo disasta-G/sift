@@ -526,6 +526,21 @@ function checkRelease(config, root) {
 		return findings;
 	}
 
+	// JSON.parse keeps the LAST of two identical keys and says nothing, so a
+	// duplicate can only be seen in the raw text. The directory bot looks for it,
+	// and a manifest whose parsed form differs from what a reader sees is worth
+	// catching regardless.
+	const rawText = manifestBuffer.toString('utf8');
+	const keyCounts = new Map();
+	for (const match of rawText.matchAll(/"((?:[^"\\]|\\.)*)"\s*:/g)) {
+		keyCounts.set(match[1], (keyCounts.get(match[1]) ?? 0) + 1);
+	}
+	for (const [key, count] of keyCounts) {
+		if (count > 1) {
+			findings.push(releaseFinding('RELEASE-MANIFEST-KEY', `duplicate key in the raw text: ${key} (${count}x)`, 'JSON.parse silently keeps the last of two identical keys, so a duplicate is invisible to every check that parses first.'));
+		}
+	}
+
 	const requiredKeys = Array.isArray(release.manifestRequiredKeys) ? release.manifestRequiredKeys : [];
 	const optionalKeys = Array.isArray(release.manifestOptionalKeys) ? release.manifestOptionalKeys : [];
 	for (const key of requiredKeys) {
