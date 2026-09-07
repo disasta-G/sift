@@ -148,9 +148,22 @@ async function main(): Promise<void> {
 
 	const status = document.getElementById('sift-preview-status');
 	if (status) status.textContent = `index ready · ${indexer.fileCount()} notes`;
+
+	// Handles for the browser harness, so a session can drive the modal the way
+	// a keyboard would and read the engine's answers back.
+	Object.assign(w.siftPreview ?? {}, { modal, deps, app, indexer });
+	w.siftPreview = { run: main, modal, deps, app, indexer };
 }
 
-const w = window as unknown as { siftPreview?: { run: () => Promise<void> } };
+interface PreviewHandles {
+	run: () => Promise<void>;
+	modal?: SearchModal;
+	deps?: unknown;
+	app?: App;
+	indexer?: Indexer;
+}
+
+const w = window as unknown as { siftPreview?: PreviewHandles };
 w.siftPreview = { run: main };
 
 void main();

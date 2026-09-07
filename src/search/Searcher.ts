@@ -4,11 +4,11 @@
  * Exact path: intersect the postings of a term's trigrams (rarest trigram
  * first), then confirm with a plain indexOf loop over the file's normalized
  * text for each variant. Terms under 3 characters skip trigrams and
- * linear-scan the candidate set. Fuzzy path (opt-in): candidates are files
- * sharing at least one trigram, filtered by trigram similarity >= 0.6, then
- * confirmed with a bounded Damerau-Levenshtein pass against the file's packed
- * word list. Applies folder, subfolder, created and modified filters. Returns
- * every match offset, already mapped to original-file coordinates.
+ * linear-scan the candidate set. Fuzzy path (opt-in): candidates are files that
+ * hold at least {@link Searcher.sharedTrigramFloor} of the term's trigrams,
+ * then confirmed with a bounded Damerau-Levenshtein pass against the file's
+ * packed word list. Applies folder, subfolder, created and modified filters.
+ * Returns every match offset, already mapped to original-file coordinates.
  *
  * ---------------------------------------------------------------------------
  * INTERSECTION IS PER VARIANT, NOT PER TERM
@@ -100,6 +100,13 @@ const MAX_MATCHES_PER_FIELD = 500;
 
 /** Files scanned between two `AbortSignal` checks. A power of two, so the test is a mask. */
 const ABORT_CHECK_INTERVAL = 256;
+
+/**
+ * Trigrams one edit can destroy: the three windows that overlap the edited
+ * position. The bound the fuzzy pre-filter rests on — see
+ * {@link Searcher.sharedTrigramFloor}.
+ */
+const TRIGRAMS_PER_EDIT = 3;
 
 /** Badness order. `exact` is best, `fuzzy` worst; used for dedup preference and for {@link RawHit.quality}. */
 const QUALITY_RANK: Readonly<Record<MatchQuality, number>> = { exact: 0, alias: 1, fuzzy: 2 };
@@ -328,10 +335,8 @@ interface VariantPlan {
 	quality: MatchQuality;
 	/** `text` split at whitespace runs. One entry for a word term. */
 	segments: readonly string[];
-	/** Whitespace-free trigrams, for the candidate step. */
+	/** Whitespace-free trigrams, for the candidate step. Deduplicated, which is what lets the fuzzy path count them. */
 	grams: readonly string[];
-	/** `grams` as a set, for the fuzzy candidate ratio. */
-	gramSet: ReadonlySet<string>;
 }
 
 /** Everything the scan needs about a term, cached on the term object. */
@@ -548,33 +553,42 @@ export class Searcher {
 	}
 
 	/**
-	 * Files that share enough of the term's trigrams to be worth a distance pass.
+	 * Files that hold enough of the term's trigrams to be worth a distance pass.
 	 *
-	 * The similarity is measured between the term's trigrams and THE SUBSET OF
-	 * THEM THE FILE HOLDS, which — the subset being contained in the term's own
-	 * set — makes the Jaccard exactly the share of the term a file can supply.
-	 * That is the only reading of "trigram similarity" that means anything at
-	 * file level: a file's own trigram set is the union of hundreds of words, so
-	 * a Jaccard against all of it would sit near zero for every query and reject
-	 * the whole vault. The distance pass then decides per word.
+	 * WHY A COUNT AND NOT A SHARE
+	 * ---------------------------
+	 * This used to be a Jaccard against `tuning.fuzzyTrigramSimilarity` (0.6).
+	 * Because the file only ever contributes a SUBSET of the term's own trigrams,
+	 * that Jaccard reduced to the share of the term a file supplies — and a
+	 * constant share is the wrong shape for the filter, because one edit destroys
+	 * up to three trigrams no matter how long the word is. The share that
+	 * survives therefore depends on the term's length, and short terms lost:
+	 * "kaffeemschine" kept 9 of 11 (0.82) and passed, while "heizng" kept 2 of 4
+	 * and "pmpe" 1 of 2 (both 0.50) and were thrown away before the distance
+	 * check ever ran. That is the reported bug — "Similar" finding nothing for a
+	 * dropped letter — and tuning a RECALL pre-filter tight enough to lose true
+	 * positives is backwards.
+	 *
+	 * The floor is now the bound the distance budget itself implies, see
+	 * {@link Searcher.sharedTrigramFloor}. When that bound is not positive it
+	 * excludes nothing, so the variant contributes every file and the
+	 * Damerau-Levenshtein pass — the precision gate — decides alone.
 	 */
 	private fuzzyCandidates(plan: TermPlan): Set<FileId> {
 		const out = new Set<FileId>();
 		for (const variant of plan.variants) {
-			if (variant.grams.length === 0) return this.allIds();
-			const held = new Map<FileId, Set<string>>();
+			const required = Searcher.sharedTrigramFloor(variant.grams.length, plan.fuzzyBudget);
+			if (required <= 0) return this.allIds();
+			// One posting per (trigram, file), and `grams` is deduplicated, so
+			// counting visits is counting the distinct trigrams the file holds.
+			const held = new Map<FileId, number>();
 			for (const gram of variant.grams) {
 				const postings = this.indexer.getPostings(gram);
 				if (postings === undefined) continue;
 				for (const id of postings as Iterable<FileId>) {
-					const grams = held.get(id);
-					if (grams === undefined) held.set(id, new Set<string>([gram]));
-					else grams.add(gram);
-				}
-			}
-			for (const [id, grams] of held) {
-				if (Searcher.trigramSimilarity(variant.gramSet, grams) >= this.tuning.fuzzyTrigramSimilarity) {
-					out.add(id);
+					const count = (held.get(id) ?? 0) + 1;
+					held.set(id, count);
+					if (count >= required) out.add(id);
 				}
 			}
 		}
@@ -888,15 +902,13 @@ export class Searcher {
 		for (const text of term.variants) {
 			if (text.length === 0 || seen.has(text)) continue;
 			seen.add(text);
-			const grams = solidTrigrams(text);
 			variants.push({
 				text,
 				// `variants[0] === normalized` is the parser's contract: the
 				// user's own spelling is the one that counts as exact.
 				quality: text === term.normalized ? 'exact' : 'alias',
 				segments: splitSegments(text),
-				grams,
-				gramSet: new Set<string>(grams),
+				grams: solidTrigrams(text),
 			});
 		}
 
@@ -916,17 +928,25 @@ export class Searcher {
 	/* Static helpers                                                         */
 	/* ---------------------------------------------------------------------- */
 
-	/** |A ∩ B| / |A ∪ B| over trigram sets. */
-	static trigramSimilarity(a: ReadonlySet<string>, b: ReadonlySet<string>): number {
-		if (a.size === 0 || b.size === 0) return 0;
-		const small = a.size <= b.size ? a : b;
-		const large = small === a ? b : a;
-		let shared = 0;
-		for (const gram of small) {
-			if (large.has(gram)) shared++;
-		}
-		const union = a.size + b.size - shared;
-		return union === 0 ? 0 : shared / union;
+	/**
+	 * How many of a term's `trigramCount` trigrams a file must hold before it is
+	 * worth a distance pass, given the Damerau-Levenshtein budget `maxDistance`.
+	 *
+	 * One edit touches at most three trigrams — the ones that span the edited
+	 * position — so a word within distance `d` of the term still shares at least
+	 * `t - 3d` of the term's trigrams. That bound, and nothing tighter, is what
+	 * the pre-filter may assume.
+	 *
+	 * A result of zero or less is not a floor of one: it means the bound excludes
+	 * nothing, which is the honest answer for a short term. `heizng` has 4
+	 * trigrams and a budget of 2, so `4 - 6` proves nothing, and `pupe` (`pup`,
+	 * `upe`) shares NO trigram at all with the `pumpe` it is one deletion from —
+	 * a floor of one would still lose it. The caller then skips the pre-filter
+	 * for that variant rather than filtering on a bound it does not have.
+	 */
+	static sharedTrigramFloor(trigramCount: number, maxDistance: number): number {
+		if (!Number.isFinite(trigramCount) || !Number.isFinite(maxDistance)) return 0;
+		return trigramCount - TRIGRAMS_PER_EDIT * Math.max(0, maxDistance);
 	}
 
 	/**

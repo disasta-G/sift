@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { installDomHelpers } from '../stubs/obsidian';
 import { ResultCard } from '../../src/ui/ResultCard';
 import { setLanguage, t } from '../../src/i18n/index';
@@ -17,7 +17,6 @@ function model(overrides: Partial<ResultCardModel> = {}): ResultCardModel {
 		selected: false,
 		dateLabel: '14.03.2026',
 		folderLabel: 'Projekte / 2026',
-		animateSelection: true,
 		...overrides,
 	};
 }
@@ -132,6 +131,81 @@ describe('snippet rendering', () => {
 		expect(card.el.querySelector('.sift-card__snippet')?.textContent).toBe(`…${text}…`);
 	});
 
+	it('renders a five-line excerpt as five lines and keeps every character', () => {
+		const lines = [
+			'## Ausstattung Pausenraum',
+			'',
+			'- Kaffeemaschine mit Festwasseranschluss',
+			'- Geschirrspüler, 60 cm',
+			'- Kühlschrank, vom Bauherrn gestellt',
+		];
+		const text = lines.join('\n');
+		const start = text.indexOf('Kaffeemaschine');
+		const card = new ResultCard(
+			host,
+			model({
+				item: item(1, {
+					snippets: [
+						snippet({
+							text,
+							marks: [{ start, end: start + 'Kaffeemaschine'.length }],
+							focus: { start, end: start + 'Kaffeemaschine'.length },
+						}),
+					],
+				}),
+			}),
+			noopCallbacks(),
+		);
+
+		const body = card.el.querySelector('.sift-snippet__body');
+		expect(body).not.toBeNull();
+		// Four breaks for five lines, and no line collapsed into its neighbour.
+		expect(body?.querySelectorAll('br').length).toBe(4);
+		expect(body?.textContent).toBe(lines.join(''));
+		expect(card.el.querySelector('mark.sift-mark')?.textContent).toBe('Kaffeemaschine');
+		// The excerpt is not preformatted: an unbroken line must wrap rather than
+		// push the modal into horizontal scrolling.
+		expect(card.el.getAttribute('style')).toBeNull();
+	});
+
+	it('treats CRLF and a lone CR as one break each, and marks survive them', () => {
+		const text = 'Zeile eins\r\nKaffeemaschine\rZeile drei';
+		const start = text.indexOf('Kaffeemaschine');
+		const card = new ResultCard(
+			host,
+			model({
+				item: item(1, {
+					snippets: [snippet({ text, marks: [{ start, end: start + 'Kaffeemaschine'.length }] })],
+				}),
+			}),
+			noopCallbacks(),
+		);
+
+		const body = card.el.querySelector('.sift-snippet__body');
+		expect(body?.querySelectorAll('br').length).toBe(2);
+		expect(body?.textContent).toBe('Zeile einsKaffeemaschineZeile drei');
+		expect(card.el.querySelector('mark.sift-mark')?.textContent).toBe('Kaffeemaschine');
+	});
+
+	it('splits a focus sentence that spans a line break into one span per line', () => {
+		const text = 'Der Anschluss für die\nKaffeemaschine ist fertig.';
+		const card = new ResultCard(
+			host,
+			model({
+				item: item(1, {
+					snippets: [snippet({ text, focus: { start: 0, end: text.length }, marks: [] })],
+				}),
+			}),
+			noopCallbacks(),
+		);
+
+		const sentences = Array.from(card.el.querySelectorAll('.sift-snippet__sentence'));
+		expect(sentences.map((el) => el.textContent)).toEqual(['Der Anschluss für die', 'Kaffeemaschine ist fertig.']);
+		// The break sits between them, at body level, not inside either span.
+		expect(card.el.querySelector('.sift-snippet__sentence br')).toBeNull();
+		expect(card.el.querySelector('.sift-snippet__body')?.querySelectorAll('br').length).toBe(1);
+	});
+
 	it('keeps an out-of-range or overlapping mark from dropping or duplicating text', () => {
 		const text = 'Kaffeemaschine im Pausenraum';
 		const card = new ResultCard(
@@ -202,22 +276,21 @@ describe('layout invariants', () => {
 });
 
 describe('selection', () => {
-	it('adds the scale class only when animateSelection is on', () => {
-		const zooming = new ResultCard(host, model({ animateSelection: true }), noopCallbacks());
-		zooming.setSelected(true);
-		expect(zooming.el.hasClass('sift-card--selected')).toBe(true);
-		expect(zooming.el.hasClass('sift-card--zoomed')).toBe(true);
-		expect(zooming.el.getAttribute('aria-selected')).toBe('true');
+	it('marks the selected card without scaling it', () => {
+		// The scale is gone from the card, not made conditional: a non-integer
+		// transform resamples the glyphs of the one card the user is reading.
+		{
+			const card = new ResultCard(host, model({}), noopCallbacks());
+			card.setSelected(true);
+			expect(card.el.hasClass('sift-card--selected')).toBe(true);
+			expect(card.el.hasClass('sift-card--zoomed')).toBe(false);
+			expect(card.el.getAttribute('aria-selected')).toBe('true');
 
-		const plain = new ResultCard(host, model({ animateSelection: false }), noopCallbacks());
-		plain.setSelected(true);
-		expect(plain.el.hasClass('sift-card--selected')).toBe(true);
-		expect(plain.el.hasClass('sift-card--zoomed')).toBe(false);
-
-		zooming.setSelected(false);
-		expect(zooming.el.hasClass('sift-card--selected')).toBe(false);
-		expect(zooming.el.hasClass('sift-card--zoomed')).toBe(false);
-		expect(zooming.el.getAttribute('aria-selected')).toBe('false');
+			card.setSelected(false);
+			expect(card.el.hasClass('sift-card--selected')).toBe(false);
+			expect(card.el.getAttribute('aria-selected')).toBe('false');
+			card.destroy();
+		}
 	});
 
 	it('reports a click as select plus open, with the modifier deciding the target', () => {
@@ -250,6 +323,151 @@ describe('selection', () => {
 		expect(host.querySelector('.sift-card')).toBeNull();
 		el.dispatchEvent(new MouseEvent('click'));
 		expect(selects).toBe(0);
+	});
+});
+
+/* -------------------------------------------------------------------------- */
+/* Scrolling the selection into view                                          */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * happy-dom computes no geometry, so the layout is modelled: a scrollport of a
+ * fixed height, cards of the heights the test names, 14px of list padding above
+ * the first one and the 18px flex gap between them — the same numbers styles.css
+ * carries.
+ */
+describe('scrolling the selection into view', () => {
+	const LIST_PADDING = 14;
+	const CARD_GAP = 18;
+	const VIEWPORT = 400;
+
+	const geometry = new Map<HTMLElement, { top: number; height: number }>();
+	let scroller: HTMLElement;
+	let restore: () => void = () => undefined;
+
+	function patchLayout(): () => void {
+		const proto = HTMLElement.prototype;
+		const before = {
+			offsetTop: Object.getOwnPropertyDescriptor(proto, 'offsetTop'),
+			offsetHeight: Object.getOwnPropertyDescriptor(proto, 'offsetHeight'),
+			clientHeight: Object.getOwnPropertyDescriptor(proto, 'clientHeight'),
+		};
+		Object.defineProperty(proto, 'offsetTop', {
+			configurable: true,
+			get(this: HTMLElement): number {
+				return geometry.get(this)?.top ?? 0;
+			},
+		});
+		Object.defineProperty(proto, 'offsetHeight', {
+			configurable: true,
+			get(this: HTMLElement): number {
+				return geometry.get(this)?.height ?? 0;
+			},
+		});
+		Object.defineProperty(proto, 'clientHeight', {
+			configurable: true,
+			get(this: HTMLElement): number {
+				return this.classList.contains('sift-results') ? VIEWPORT : 0;
+			},
+		});
+		return () => {
+			for (const [name, descriptor] of Object.entries(before)) {
+				if (descriptor === undefined) delete (proto as unknown as Record<string, unknown>)[name];
+				else Object.defineProperty(proto, name, descriptor);
+			}
+		};
+	}
+
+	/** Builds a list of cards with the given heights and returns them. */
+	function mountCards(heights: readonly number[]): ResultCard[] {
+		scroller = document.body.createDiv({ cls: 'sift-results' });
+		const list = scroller.createDiv({ cls: 'sift-results__list' });
+		const cards: ResultCard[] = [];
+		let top = LIST_PADDING;
+		for (let index = 0; index < heights.length; index++) {
+			const card = new ResultCard(list, model({ index }), noopCallbacks());
+			geometry.set(card.el, { top, height: heights[index] });
+			top += heights[index] + CARD_GAP;
+			cards.push(card);
+		}
+		return cards;
+	}
+
+	/** Where the card's border box sits inside the scrollport after the correction. */
+	function frame(card: ResultCard): { top: number; bottom: number } {
+		const box = geometry.get(card.el) ?? { top: 0, height: 0 };
+		return { top: box.top - scroller.scrollTop, bottom: box.top + box.height - scroller.scrollTop };
+	}
+
+	beforeEach(() => {
+		geometry.clear();
+		restore = patchLayout();
+	});
+
+	afterEach(() => {
+		restore();
+		geometry.clear();
+	});
+
+	it('never cuts the border of a card it scrolls to, at either edge', () => {
+		const cards = mountCards([124, 124, 124, 124, 124, 124]);
+
+		// Walking down and back up again: after every correction the whole border
+		// box, the 1px accent frame included, is inside the scrollport.
+		for (const card of cards) {
+			card.scrollIntoViewIfNeeded();
+			const box = frame(card);
+			expect(box.top).toBeGreaterThanOrEqual(1);
+			expect(box.bottom).toBeLessThanOrEqual(VIEWPORT - 1);
+		}
+		for (const card of [...cards].reverse()) {
+			card.scrollIntoViewIfNeeded();
+			const box = frame(card);
+			expect(box.top).toBeGreaterThanOrEqual(1);
+			expect(box.bottom).toBeLessThanOrEqual(VIEWPORT - 1);
+		}
+	});
+
+	it('leaves the first card where the list padding puts it and does not scroll above it', () => {
+		const cards = mountCards([124, 124, 124]);
+		cards[2].scrollIntoViewIfNeeded();
+		expect(scroller.scrollTop).toBeGreaterThan(0);
+
+		cards[0].scrollIntoViewIfNeeded();
+		expect(scroller.scrollTop).toBe(0);
+		expect(frame(cards[0]).top).toBe(LIST_PADDING);
+	});
+
+	it('brings the last card fully inside, bottom edge and all', () => {
+		const cards = mountCards([124, 124, 124, 124, 124, 124, 124, 124]);
+		const last = cards[cards.length - 1];
+		last.scrollIntoViewIfNeeded();
+
+		const box = frame(last);
+		expect(box.bottom).toBe(VIEWPORT - LIST_PADDING);
+		expect(box.top).toBeGreaterThanOrEqual(1);
+	});
+
+	it('top-aligns a card too tall to fit rather than cutting its top off', () => {
+		// This is the reported defect. Bottom-aligning a card that is taller than
+		// the scrollport puts its top ABOVE the client edge by exactly the overflow,
+		// and `overflow-y: auto` then clips the accent border away — the frame the
+		// owner saw open at the top. A card of exactly `viewport - padding` lands
+		// flush with the edge, which rounds to the same thing.
+		const cards = mountCards([124, VIEWPORT - LIST_PADDING, VIEWPORT + 20, 124]);
+
+		cards[1].scrollIntoViewIfNeeded();
+		expect(frame(cards[1]).top).toBeGreaterThanOrEqual(1);
+
+		cards[2].scrollIntoViewIfNeeded();
+		expect(frame(cards[2]).top).toBeGreaterThanOrEqual(1);
+	});
+
+	it('does nothing at all without a scrollport, so a detached card is safe', () => {
+		const card = new ResultCard(host, model(), noopCallbacks());
+		expect(() => {
+			card.scrollIntoViewIfNeeded();
+		}).not.toThrow();
 	});
 });
 

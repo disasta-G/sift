@@ -28,7 +28,7 @@ const TUNING: SiftTuning = Object.freeze({
 	maxTermVariants: 8,
 	maxQueryLength: 512,
 	snippetLength: 160,
-	fuzzyTrigramSimilarity: 0.6,
+	snippetLines: 5,
 	fuzzyMaxDistanceShort: 1,
 	fuzzyMaxDistanceLong: 2,
 	fuzzyShortTermMaxLength: 5,
@@ -187,6 +187,42 @@ function fakeIndexer(records: readonly IndexedFile[]): Indexer {
 /** A Snippets whose app and index are empty; enough for the synchronous core and the statics. */
 function offlineSnippets(): Snippets {
 	return new Snippets(createFakeApp({}).asApp(), fakeIndexer([]), TUNING);
+}
+
+/** The same, with a few tuning values changed. */
+function snippetsWith(overrides: Partial<SiftTuning>): Snippets {
+	return new Snippets(createFakeApp({}).asApp(), fakeIndexer([]), { ...TUNING, ...overrides });
+}
+
+/**
+ * `count` numbered lines with no blank line between them, so the whole thing is
+ * ONE block and the only thing that limits an excerpt is the line budget. Line
+ * `marked` carries `word`; every line is about 45 characters, so five of them
+ * stay well inside the character ceiling.
+ */
+function paragraph(count: number, marked: number, word: string): string {
+	const lines: string[] = [];
+	for (let i = 0; i < count; i++) {
+		const number = String(i).padStart(2, '0');
+		lines.push(
+			i === marked
+				? `Zeile ${number} nennt die ${word} und hoert dann auf.`
+				: `Zeile ${number} ist Fuelltext ganz ohne einen Treffer.`,
+		);
+	}
+	return lines.join('\n');
+}
+
+/** The excerpt's lines. The fixtures use `\n`, so a plain split is enough. */
+function linesOf(snippet: Snippet): string[] {
+	return snippet.text.split('\n');
+}
+
+/** The one excerpt `word` produces in `original`, with the given tuning. */
+function onlySnippet(snippets: Snippets, original: string, folded: string): Snippet {
+	const built = snippets.buildForFile(makeRecord(original), original, matchesOf(original, folded), 1);
+	expect(built).toHaveLength(1);
+	return built[0];
 }
 
 /* -------------------------------------------------------------------------- */
@@ -620,6 +656,143 @@ describe('Snippets.buildForFile', () => {
 				expect(snippet.text.slice(mark.start, mark.end)).toBe('Küche');
 			}
 		}
+	});
+
+	/* ---------------------------------------------------------------------- */
+	/* Five lines of context                                                  */
+	/* ---------------------------------------------------------------------- */
+
+	/**
+	 * The owner asked to see the hit IN CONTEXT rather than inside a 160-character
+	 * window, so an excerpt is whole lines now: the matched line plus its
+	 * neighbours, at most `snippetLines`, still clamped to the block.
+	 */
+	it('shows five lines centred on a match in the middle of a long paragraph', () => {
+		const original = paragraph(20, 6, 'Kueche');
+		const snippet = onlySnippet(offlineSnippets(), original, 'kueche');
+
+		expectWellFormed(snippet, original);
+		const lines = linesOf(snippet);
+		expect(lines).toHaveLength(5);
+		// Four spare lines split evenly: two above the hit and two below it.
+		expect(lines[0].startsWith('Zeile 04')).toBe(true);
+		expect(lines[2]).toContain('Kueche');
+		expect(lines[4].startsWith('Zeile 08')).toBe(true);
+		expect(snippet.text).toBe(original.split('\n').slice(4, 9).join('\n'));
+	});
+
+	it('shows the line plus the four after it when the match is on the first line', () => {
+		const original = paragraph(20, 0, 'Kueche');
+		const snippet = onlySnippet(offlineSnippets(), original, 'kueche');
+
+		expectWellFormed(snippet, original);
+		const lines = linesOf(snippet);
+		expect(lines).toHaveLength(5);
+		expect(lines[0]).toContain('Kueche');
+		expect(lines[4].startsWith('Zeile 04')).toBe(true);
+		expect(snippet.offset).toBe(0);
+		expect(snippet.leadingEllipsis).toBe(false);
+	});
+
+	it('hands the lines it cannot take above the match to the lines below it', () => {
+		const original = paragraph(20, 1, 'Kueche');
+		const snippet = onlySnippet(offlineSnippets(), original, 'kueche');
+
+		// Only one line exists above the hit, so the other goes below: 1 up, 3 down.
+		const lines = linesOf(snippet);
+		expect(lines).toHaveLength(5);
+		expect(lines[0].startsWith('Zeile 00')).toBe(true);
+		expect(lines[1]).toContain('Kueche');
+		expect(lines[4].startsWith('Zeile 04')).toBe(true);
+	});
+
+	it('yields the two lines a two-line block has, not five', () => {
+		const original = [
+			'# Kueche',
+			'',
+			'Die Kaffeemaschine ist neu.',
+			'Sie steht direkt am Fenster.',
+			'',
+			'Ein ganz anderer Absatz folgt hier.',
+		].join('\n');
+		const snippet = onlySnippet(offlineSnippets(), original, 'kaffeemaschine');
+
+		expectWellFormed(snippet, original);
+		expect(linesOf(snippet)).toEqual(['Die Kaffeemaschine ist neu.', 'Sie steht direkt am Fenster.']);
+	});
+
+	/**
+	 * A note written one paragraph per line is a single very long line, and five
+	 * of those would be the whole note. The per-line ceiling is `snippetLength`,
+	 * and it is the one case an excerpt does not begin and end on a line boundary.
+	 */
+	it('trims a 4 000-character line instead of showing all of it', () => {
+		const original = ['Eine kurze Zeile davor.', place(4000, [[2000, 'Waermepumpe']]), 'Eine kurze Zeile danach.'].join(
+			'\n',
+		);
+		const snippet = onlySnippet(offlineSnippets(), original, 'waermepumpe');
+
+		expectWellFormed(snippet, original);
+		expect(snippet.text).toContain('Waermepumpe');
+		expect(snippet.text).not.toContain('\n');
+		expect(snippet.text.length).toBeLessThan(TUNING.snippetLength + 16);
+		expect(snippet.leadingEllipsis).toBe(true);
+		expect(snippet.trailingEllipsis).toBe(true);
+	});
+
+	it('keeps every mark on the original spelling when the excerpt spans lines', () => {
+		const original = [
+			'Die Lüftung der Küche ist neu.',
+			'Die Küche im Erdgeschoss wird geplant.',
+			'Später folgt mehr über die Küche.',
+		].join('\n');
+		const snippet = onlySnippet(offlineSnippets(), original, 'kuche');
+
+		expectWellFormed(snippet, original);
+		expect(linesOf(snippet)).toHaveLength(3);
+		expect(snippet.marks).toHaveLength(3);
+		for (const mark of snippet.marks) {
+			expect(snippet.text.slice(mark.start, mark.end)).toBe('Küche');
+			const absolute = snippet.offset + mark.start;
+			expect(original.slice(absolute, absolute + 'Küche'.length)).toBe('Küche');
+		}
+	});
+
+	it('honours the configured line budget and puts an odd spare line below the hit', () => {
+		const original = paragraph(20, 6, 'Kueche');
+
+		expect(linesOf(onlySnippet(snippetsWith({ snippetLines: 1 }), original, 'kueche'))).toHaveLength(1);
+		expect(linesOf(onlySnippet(snippetsWith({ snippetLines: 3 }), original, 'kueche'))).toHaveLength(3);
+
+		const four = linesOf(onlySnippet(snippetsWith({ snippetLines: 4 }), original, 'kueche'));
+		expect(four).toHaveLength(4);
+		// One line above, two below — a hit introduces what follows it.
+		expect(four[1]).toContain('Kueche');
+	});
+
+	it('falls back to a sane budget when the tuning object carries nonsense', () => {
+		const original = paragraph(20, 6, 'Kueche');
+
+		expect(linesOf(onlySnippet(snippetsWith({ snippetLines: Number.NaN }), original, 'kueche'))).toHaveLength(5);
+		// Never less than the line the match sits on.
+		expect(linesOf(onlySnippet(snippetsWith({ snippetLines: 0 }), original, 'kueche'))).toHaveLength(1);
+		expect(linesOf(onlySnippet(snippetsWith({ snippetLines: -3 }), original, 'kueche'))).toHaveLength(1);
+	});
+
+	it('still never reaches out of the block, however much line budget is left', () => {
+		const original = [
+			'---',
+			'created: 2026-01-21',
+			'---',
+			'# Ausstattung Pausenraum',
+			'Wunschliste Mitarbeitende: eine Espressomaschine für die Küche.',
+			'',
+			'Ein zweiter Absatz, der nicht dazugehoert.',
+		].join('\n');
+		const snippet = onlySnippet(offlineSnippets(), original, 'espressomaschine');
+
+		expectWellFormed(snippet, original);
+		expect(linesOf(snippet)).toEqual(['Wunschliste Mitarbeitende: eine Espressomaschine für die Küche.']);
 	});
 });
 

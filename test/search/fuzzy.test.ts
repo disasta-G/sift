@@ -130,6 +130,63 @@ const DEVICES_PATH = 'Kaffee/Geraete.md';
 const TYPO_PATH = 'Kaffee/Exakt.md';
 const BUDGET_PATH = 'Wortliste/Budget.md';
 
+/* -------------------------------------------------------------------------- */
+/* The dropped-letter corpus                                                  */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * One word per note, of every length band the distance budget distinguishes.
+ *
+ * Hand-built rather than taken from the generated vault so the suite does not
+ * depend on which words happen to be on disk: here the ONLY thing that can
+ * answer `heiung` is the `Heizung` in note 0, and the surrounding sentence is
+ * the same in every note so it cannot answer anything by itself.
+ */
+const DELETION_WORDS: readonly string[] = [
+	'Pumpe',
+	'Kueche',
+	'Heizung',
+	'Kitchen',
+	'Lueftung',
+	'Kaffeemaschine',
+];
+
+/** Vault-relative path of the note that carries `DELETION_WORDS[index]`. */
+function deletionPath(index: number): string {
+	return `Woerter/Notiz ${index}.md`;
+}
+
+const DELETION_VAULT: Record<string, FakeFileSpec> = Object.fromEntries(
+	DELETION_WORDS.map((word, index) => [
+		deletionPath(index),
+		{
+			content: [`# Notiz ${index}`, '', `Hier steht ${word} und sonst nichts von Belang.`].join('\n'),
+			ctime: 1_700_000_100_000 + index,
+		},
+	]),
+);
+
+/** Every single-letter deletion of `word`, deduplicated (a doubled letter yields the same word twice). */
+function singleLetterDeletions(word: string): string[] {
+	const out: string[] = [];
+	for (let i = 0; i < word.length; i++) {
+		const deleted = word.slice(0, i) + word.slice(i + 1);
+		if (out.indexOf(deleted) < 0) out.push(deleted);
+	}
+	return out;
+}
+
+/** `[word, deletion, path]` for every word in {@link DELETION_WORDS} and every deletion of it. */
+function deletionCases(): Array<[string, string, string]> {
+	const cases: Array<[string, string, string]> = [];
+	DELETION_WORDS.forEach((word, index) => {
+		for (const deleted of singleLetterDeletions(word)) {
+			cases.push([word, deleted, deletionPath(index)]);
+		}
+	});
+	return cases;
+}
+
 /**
  * How many fixture notes this suite indexes.
  *
@@ -141,17 +198,20 @@ const BUDGET_PATH = 'Wortliste/Budget.md';
 const VAULT_NOTES = 600;
 
 let small: Harness;
+let deletions: Harness;
 let vault: LoadedVault;
 let fixture: Harness;
 
 beforeAll(async () => {
 	small = await buildHarness(FUZZY_VAULT);
+	deletions = await buildHarness(DELETION_VAULT);
 	vault = loadVault(undefined, VAULT_NOTES);
 	fixture = await buildHarness(vault.files);
 }, 120_000);
 
 afterAll(() => {
 	small?.indexer.stop();
+	deletions?.indexer.stop();
 	fixture?.indexer.stop();
 });
 
@@ -303,37 +363,104 @@ describe('Searcher — fuzzy over the generated vault', () => {
 });
 
 /* ========================================================================== */
-/* trigramSimilarity                                                          */
+/* A dropped letter                                                           */
 /* ========================================================================== */
 
-describe('Searcher.trigramSimilarity', () => {
-	it('is 1 for identical sets and 0 for disjoint ones', () => {
-		const a = trigramSet('kaffee');
-		expect(Searcher.trigramSimilarity(a, trigramSet('kaffee'))).toBe(1);
-		expect(Searcher.trigramSimilarity(trigramSet('abcdef'), trigramSet('uvwxyz'))).toBe(0);
+/**
+ * The bug the owner reported: "Similar" finding nothing for a word with one
+ * letter missing. Of 209 single-letter deletions across the generated vault,
+ * six came back empty — every one of them from a short or medium word, while
+ * long words always worked. The asymmetry was the tell: the candidate filter
+ * asked for a constant SHARE of the term's trigrams, and one edit destroys up
+ * to three trigrams however long the word is, so the surviving share falls with
+ * the term's length. The six are pinned here by name, and the property below
+ * covers the rest.
+ */
+describe('Searcher — a single dropped letter', () => {
+	const REPORTED: Array<[string, string, number]> = [
+		['Heizung', 'heiung', 2],
+		['Heizung', 'heizng', 2],
+		['Heizung', 'heizug', 2],
+		['Pumpe', 'pmpe', 0],
+		['Pumpe', 'pupe', 0],
+		['Kitchen', 'kitcen', 3],
+	];
+
+	it.each(REPORTED)('finds %s for "%s"', (word, deleted, index) => {
+		const hits = run(deletions.searcher, deleted, true);
+		expect(paths(hits), `${deleted} -> ${word}`).toContain(deletionPath(index));
 	});
 
-	it('is |A ∩ B| / |A ∪ B|', () => {
-		const a = new Set(['abc', 'bcd']);
-		const b = new Set(['bcd', 'cde']);
-		expect(Searcher.trigramSimilarity(a, b)).toBeCloseTo(1 / 3, 12);
-		expect(Searcher.trigramSimilarity(b, a)).toBeCloseTo(1 / 3, 12);
+	it('reaches the file through the candidate step, not only through the scan', () => {
+		for (const [, deleted, index] of REPORTED) {
+			const term = parseQuery(deleted, DEFAULT_TUNING).terms[0];
+			const file = deletions.indexer.getFileByPath(deletionPath(index));
+			if (file === undefined) throw new Error(`fixture note missing for "${deleted}"`);
+			// A file the candidate step drops is never verified at all, so this is
+			// the assertion that actually pins the fix.
+			expect(deletions.searcher.candidates(term, true).has(file.id), deleted).toBe(true);
+		}
 	});
 
-	it('is 0 when either side is empty', () => {
-		expect(Searcher.trigramSimilarity(new Set(), new Set(['abc']))).toBe(0);
-		expect(Searcher.trigramSimilarity(new Set(['abc']), new Set())).toBe(0);
-		expect(Searcher.trigramSimilarity(new Set(), new Set())).toBe(0);
+	/**
+	 * The general property, and the one that would have caught the regression:
+	 * whatever the word's length, dropping one letter from it still finds it.
+	 */
+	it.each(deletionCases())('finds %s for "%s", one letter short', (word, deleted, path) => {
+		const hits = run(deletions.searcher, deleted, true);
+		expect(paths(hits), `${deleted} -> ${word}`).toContain(path);
 	});
 
-	it('clears the tuning floor for the misspellings the plan names', () => {
-		const floor = DEFAULT_TUNING.fuzzyTrigramSimilarity;
-		expect(Searcher.trigramSimilarity(trigramSet('kafeemaschine'), trigramSet('kaffeemaschine'))).toBeGreaterThan(
-			floor,
-		);
-		expect(
-			Searcher.trigramSimilarity(trigramSet('espresomaschine'), trigramSet('espressomaschine')),
-		).toBeGreaterThan(floor);
+	it('does not turn the switch into a match-everything toggle', () => {
+		// A word that is not a deletion of anything in the corpus stays unanswered,
+		// so the widened candidate set is still filtered by the distance pass.
+		expect(run(deletions.searcher, 'zylinderkopfdichtung', true)).toEqual([]);
+		expect(run(deletions.searcher, 'xyzzyfoo', true)).toEqual([]);
+	});
+});
+
+/* ========================================================================== */
+/* sharedTrigramFloor                                                         */
+/* ========================================================================== */
+
+describe('Searcher.sharedTrigramFloor', () => {
+	it('is the term trigram count less three per edit', () => {
+		expect(Searcher.sharedTrigramFloor(11, 2)).toBe(5);
+		expect(Searcher.sharedTrigramFloor(12, 2)).toBe(6);
+		expect(Searcher.sharedTrigramFloor(8, 1)).toBe(5);
+	});
+
+	it('admits the long misspellings the plan names', () => {
+		// A dropped letter in a long word is the case the old share handled well,
+		// and the bound has to keep handling it: "kaffeemschine" has 11 trigrams,
+		// keeps 9 of them, and the floor is 5.
+		const term = trigramSet('kaffeemschine');
+		const file = trigramSet('kaffeemaschine');
+		let shared = 0;
+		for (const gram of term) {
+			if (file.has(gram)) shared++;
+		}
+		expect(term.size).toBe(11);
+		expect(shared).toBe(9);
+		expect(Searcher.sharedTrigramFloor(term.size, DEFAULT_TUNING.fuzzyMaxDistanceLong)).toBe(5);
+		expect(shared).toBeGreaterThanOrEqual(Searcher.sharedTrigramFloor(term.size, DEFAULT_TUNING.fuzzyMaxDistanceLong));
+	});
+
+	it('proves nothing for the short terms that used to be rejected', () => {
+		// "heizng": 4 trigrams, budget 2. "pmpe": 2 trigrams, budget 1. Under the
+		// old 0.6 share both kept exactly half and were dropped; the bound says
+		// there is nothing to filter on.
+		expect(trigramSet('heizng').size).toBe(4);
+		expect(Searcher.sharedTrigramFloor(4, DEFAULT_TUNING.fuzzyMaxDistanceLong)).toBeLessThanOrEqual(0);
+		expect(trigramSet('pmpe').size).toBe(2);
+		expect(Searcher.sharedTrigramFloor(2, DEFAULT_TUNING.fuzzyMaxDistanceShort)).toBeLessThanOrEqual(0);
+	});
+
+	it('survives a hand-edited tuning object', () => {
+		expect(Searcher.sharedTrigramFloor(Number.NaN, 2)).toBe(0);
+		expect(Searcher.sharedTrigramFloor(11, Number.POSITIVE_INFINITY)).toBe(0);
+		// A negative budget cannot buy back trigrams.
+		expect(Searcher.sharedTrigramFloor(11, -5)).toBe(11);
 	});
 });
 

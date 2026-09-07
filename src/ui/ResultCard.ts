@@ -3,10 +3,20 @@
  * 600) with the created date right-aligned in --text-muted, the folder path in
  * --text-faint below, then the snippets with matches wrapped in a marked span.
  *
- * Selection applies the 1.02 scale and accent border when enabled. Text runs
- * are appended as alternating spans, never as HTML, which is how marks survive
- * the no-innerHTML rule. Dumb component — it reads its model and calls back, it
- * never touches the index.
+ * Selection is an accent border plus a slightly lifted fill; it carries no
+ * transform. Text runs are appended as alternating spans, never as HTML, which
+ * is how marks survive the no-innerHTML rule. Dumb component — it reads its
+ * model and calls back, it never touches the index.
+ *
+ * MULTI-LINE EXCERPTS
+ * -------------------
+ * A {@link Snippet} covers up to five LINES of the note, so `snippet.text` may
+ * contain line breaks. They are rendered as `<br>` between the runs of a line,
+ * not as `white-space: pre`: the excerpt is note text the card does not control,
+ * and preserved whitespace would let one long unbroken line push the whole modal
+ * into horizontal scrolling. The runs themselves are unchanged, so a mark that
+ * sits on one line still covers exactly the characters it covered before, and
+ * `body.textContent` is still `snippet.text` minus the break characters.
  *
  * LISTENER OWNERSHIP
  * ------------------
@@ -38,6 +48,10 @@ const PATH_SEPARATOR = ' / ';
 /** Prefix of the DOM id of a card, referenced by the input's `aria-activedescendant`. */
 export const CARD_ID_PREFIX = 'sift-result-';
 
+/** U+000A LINE FEED and U+000D CARRIAGE RETURN, the two break characters an excerpt can carry. */
+const CHAR_LF = 0x0a;
+const CHAR_CR = 0x0d;
+
 /** One run of snippet text, already classified. */
 interface TextRun {
 	start: number;
@@ -46,6 +60,8 @@ interface TextRun {
 	focused: boolean;
 	/** Inside one of {@link Snippet.marks}. */
 	marked: boolean;
+	/** The run IS a line break (`\n`, `\r` or `\r\n`) and renders as `<br>` rather than as text. */
+	lineBreak: boolean;
 }
 
 export class ResultCard {
@@ -106,8 +122,23 @@ export class ResultCard {
 	}
 
 	/**
-	 * Scrolls the card into the results viewport when it sits outside it. Reads
+	 * Scrolls the card into the results viewport when it sits outside it, keeping
+	 * {@link SCROLL_MARGIN} clear at whichever edge it came to rest against. Reads
 	 * layout only — under a test DOM every metric is 0 and the method is a no-op.
+	 *
+	 * WHY THE MARGIN IS NOT OPTIONAL
+	 * ------------------------------
+	 * `.sift-results` clips at `overflow-y: auto`, so a card that lands flush with
+	 * the scrollport edge loses the outer row of its own border — the selected
+	 * card's frame then reads as open at the top, which is what the owner saw.
+	 * Bottom-aligning a card that is TALLER than the scrollport does exactly that:
+	 * `bottom - viewport` puts its top above the edge by however much it does not
+	 * fit. A card that cannot fit is therefore top-aligned instead, the way
+	 * `scroll-margin-block` plus `scrollIntoView({ block: 'nearest' })` would
+	 * resolve it. (The native pair is not used: the card is scrolled by explicit
+	 * `scrollTop` arithmetic, deliberately, so that the correction cannot rebuild
+	 * the rendered window under a mouse button that is still down — and
+	 * `scroll-margin` has no effect on an assignment to `scrollTop`.)
 	 */
 	scrollIntoViewIfNeeded(): void {
 		const scroller = this.el.closest('.sift-results');
@@ -116,14 +147,16 @@ export class ResultCard {
 		if (viewport <= 0) return;
 
 		const cardTop = this.el.offsetTop;
-		const cardBottom = cardTop + this.el.offsetHeight;
+		const cardHeight = this.el.offsetHeight;
+		const cardBottom = cardTop + cardHeight;
 		const viewTop = scroller.scrollTop;
 		const viewBottom = viewTop + viewport;
+		const fits = cardHeight + 2 * SCROLL_MARGIN <= viewport;
 
-		if (cardTop < viewTop) {
-			scroller.scrollTop = Math.max(0, cardTop - SCROLL_PADDING);
-		} else if (cardBottom > viewBottom) {
-			scroller.scrollTop = cardBottom - viewport + SCROLL_PADDING;
+		if (!fits || cardTop - SCROLL_MARGIN < viewTop) {
+			scroller.scrollTop = Math.max(0, cardTop - SCROLL_MARGIN);
+		} else if (cardBottom + SCROLL_MARGIN > viewBottom) {
+			scroller.scrollTop = cardBottom + SCROLL_MARGIN - viewport;
 		}
 	}
 
@@ -206,11 +239,19 @@ export class ResultCard {
 			row.createSpan({ cls: 'sift-snippet__ellipsis', text: ELLIPSIS });
 		}
 
-		// The body's concatenated textContent is exactly `snippet.text`; the
-		// ellipses live outside it so that invariant stays checkable.
+		// The body's concatenated textContent is exactly `snippet.text` minus its
+		// line breaks, which became `<br>` elements; the ellipses live outside it so
+		// that invariant stays checkable.
 		const body = row.createSpan({ cls: 'sift-snippet__body' });
 		let sentence: HTMLElement | null = null;
 		for (const run of splitRuns(snippet)) {
+			if (run.lineBreak) {
+				// A sentence span never straddles a break: one span per line keeps the
+				// focus colouring a property of the text and not of the line box.
+				sentence = null;
+				body.createEl('br');
+				continue;
+			}
 			const text = snippet.text.slice(run.start, run.end);
 			if (text.length === 0) continue;
 			if (!run.focused) sentence = null;
@@ -225,16 +266,31 @@ export class ResultCard {
 		}
 	}
 
+	/**
+	 * The selected card carries the accent border, the shadow and the lifted fill
+	 * from `.sift-card--selected` — and nothing else.
+	 *
+	 * It used to also carry `transform: scale(1.02)`. A non-integer scale
+	 * resamples the glyphs, which is the soft text the owner reported, and a
+	 * default that blurs the one card the user is reading is not worth keeping;
+	 * it is gone rather than made optional. The flag that once switched it
+	 * is gone with it.
+	 */
 	private applySelection(): void {
-		const { selected, animateSelection } = this.model;
+		const selected = this.model.selected;
 		this.el.toggleClass('sift-card--selected', selected);
-		this.el.toggleClass('sift-card--zoomed', selected && animateSelection);
 		this.el.setAttr('aria-selected', selected ? 'true' : 'false');
 	}
 }
 
-/** Distance kept between a scrolled-to card and the viewport edge, in pixels. */
-const SCROLL_PADDING = 14;
+/**
+ * Distance kept between a scrolled-to card and the viewport edge, in pixels.
+ *
+ * It is the padding of `.sift-results`, so a card scrolled to either end comes
+ * to rest exactly where the list's own padding puts it, with the whole 1px
+ * accent border and its shadow inside the scrollport.
+ */
+const SCROLL_MARGIN = 14;
 
 /** Modifier click opens in a new tab, shift-click in a split, per the plan's keyboard map. */
 function targetFromEvent(evt: MouseEvent): OpenTarget {
@@ -243,11 +299,13 @@ function targetFromEvent(evt: MouseEvent): OpenTarget {
 }
 
 /**
- * Cuts `snippet.text` into runs at every mark and focus boundary.
+ * Cuts `snippet.text` into runs at every mark, focus and line boundary.
  *
  * Defensive on purpose: marks are sorted, clamped to the text and merged, and
  * the focus span is clamped too, so a malformed snippet can never drop or
- * duplicate a character. The runs always tile `[0, text.length)` exactly.
+ * duplicate a character. The runs always tile `[0, text.length)` exactly — the
+ * break characters included, as runs of their own that the renderer turns into
+ * `<br>`.
  */
 function splitRuns(snippet: Snippet): TextRun[] {
 	const length = snippet.text.length;
@@ -255,6 +313,7 @@ function splitRuns(snippet: Snippet): TextRun[] {
 
 	const marks = normalizeMarks(snippet.marks, length);
 	const focus = clampSpan(snippet.focus, length);
+	const breaks = lineBreakSpans(snippet.text);
 
 	const cuts = new Set<number>([0, length]);
 	if (focus !== null) {
@@ -264,6 +323,10 @@ function splitRuns(snippet: Snippet): TextRun[] {
 	for (const mark of marks) {
 		cuts.add(mark.start);
 		cuts.add(mark.end);
+	}
+	for (const span of breaks) {
+		cuts.add(span.start);
+		cuts.add(span.end);
 	}
 
 	const boundaries = [...cuts].sort((a, b) => a - b);
@@ -276,9 +339,29 @@ function splitRuns(snippet: Snippet): TextRun[] {
 			end,
 			focused: focus !== null && start >= focus.start && end <= focus.end,
 			marked: marks.some((mark) => start >= mark.start && end <= mark.end),
+			lineBreak: breaks.some((span) => start >= span.start && end <= span.end),
 		});
 	}
 	return runs;
+}
+
+/**
+ * The line breaks of an excerpt, as spans of the text: `\r\n` first, so a
+ * Windows file does not produce two blank-looking breaks where it has one.
+ *
+ * Exported shape stays internal; the offsets are relative to `snippet.text`, in
+ * the same domain as its marks.
+ */
+function lineBreakSpans(text: string): Span[] {
+	const spans: Span[] = [];
+	for (let at = 0; at < text.length; at++) {
+		const code = text.charCodeAt(at);
+		if (code !== CHAR_LF && code !== CHAR_CR) continue;
+		const end = code === CHAR_CR && text.charCodeAt(at + 1) === CHAR_LF ? at + 2 : at + 1;
+		spans.push({ start: at, end });
+		at = end - 1;
+	}
+	return spans;
 }
 
 /** Sorted, clamped, non-overlapping copy of the mark list. */

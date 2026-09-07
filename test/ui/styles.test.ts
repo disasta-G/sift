@@ -79,18 +79,46 @@ describe('styles.css', () => {
 		expect(BODY).not.toContain('!important');
 	});
 
-	it('scales the selected card and animates it for 120 ms', () => {
-		expect(BODY).toMatch(/\.sift-card\b[^{]*\{[^}]*transition:\s*transform 120ms ease-out/);
-		expect(BODY).toMatch(/\.sift-card--zoomed\s*\{[^}]*transform:\s*scale\(1\.02\)/);
-		expect(BODY).toMatch(/\.sift-card--zoomed\s*\{[^}]*will-change:\s*transform/);
+	it('marks the selected card with a border, a shadow and a lifted fill, and no transform', () => {
+		const rule = BODY.match(/\.sift-card--selected\s*\{([^}]*)\}/)?.[1] ?? '';
+		expect(rule).toContain('border-color: var(--interactive-accent)');
+		expect(rule).toContain('box-shadow: var(--shadow-l2)');
+		// A translucent overlay laid OVER the card's own fill, so it lifts a dark
+		// card and tints a white one. As a background-color it would composite
+		// against the modal instead and invert in themes whose primary is lighter
+		// than their secondary.
+		expect(rule).toMatch(
+			/background-image:\s*linear-gradient\(var\(--background-modifier-hover\), var\(--background-modifier-hover\)\)/,
+		);
+		// The 1.02 scale is gone for good: a non-integer transform resamples the
+		// text of the one card the user is reading.
+		expect(BODY).not.toMatch(/transform:\s*scale/);
+		expect(BODY).not.toContain('sift-card--zoomed');
+		expect(BODY).not.toMatch(/\.sift-card\b[^{]*\{[^}]*transition:/);
 	});
 
-	it('drops the transition under reduced motion but keeps the scale', () => {
+	it('leaves no reduced-motion rule that switches nothing off', () => {
 		const block = BODY.match(/@media \(prefers-reduced-motion: reduce\)\s*\{([\s\S]*?)\n\}/);
 		expect(block).not.toBeNull();
 		const body = block?.[1] ?? '';
-		expect(body).toMatch(/\.sift-card\s*\{[^}]*transition:\s*none/);
-		expect(body).not.toMatch(/transform:/);
+		// The card has no transition left to disable, so it is not listed; what is
+		// listed really does move.
+		expect(body).not.toMatch(/\.sift-card\s*\{/);
+		expect(body).toMatch(/\.sift-toggle__thumb\s*\{[^}]*transition:\s*none/);
+		expect(body).toMatch(/\.sift-flash\s*\{[^}]*animation:\s*none/);
+	});
+
+	it('paints the calendar range from Obsidian variables, ends apart from the days between', () => {
+		const ends = BODY.match(/\.sift-cal__day--start,\s*\.sift-cal__day--end\s*\{([^}]*)\}/)?.[1] ?? '';
+		expect(ends).toContain('background-color: var(--interactive-accent)');
+		expect(ends).toContain('color: var(--text-on-accent)');
+
+		const inside = BODY.match(/\.sift-cal__day--inside\s*\{([^}]*)\}/)?.[1] ?? '';
+		expect(inside).toContain('background-color: var(--background-modifier-hover)');
+
+		// The popover is absolutely positioned, so the calendar cannot make the
+		// filter bar taller.
+		expect(BODY).toMatch(/\.sift-date-menu\s*\{[^}]*position:\s*absolute/);
 	});
 
 	it('keeps the modal geometry the plan asks for', () => {

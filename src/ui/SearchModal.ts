@@ -83,8 +83,18 @@ const WINDOW_BLOCK = 20;
  */
 const SNIPPET_BATCH = 8;
 
-/** Card height plus the list gap, until a real card has been measured. */
+/**
+ * Card height plus the list gap, until a real card has been measured.
+ *
+ * A card with a five-line excerpt is roughly twice this, so the estimate is only
+ * ever the first guess: {@link SearchModal.measureRowHeight} replaces it with the
+ * average of the cards actually on screen, and the window is recomputed against
+ * that measurement in the same pass — see {@link SearchModal.updateWindow}.
+ */
 const DEFAULT_ROW_HEIGHT = 142;
+
+/** A re-measured row height has to differ by at least this much before the spacers are rewritten. */
+const ROW_HEIGHT_EPSILON = 2;
 
 /** Viewport height assumed when the list has not been laid out yet (test DOM, first paint). */
 const FALLBACK_VIEWPORT = 640;
@@ -655,6 +665,7 @@ export class SearchModal extends Modal {
 	}
 
 	private writeSnippets(batch: readonly number[], built: readonly ResultItem[]): void {
+		let wrote = false;
 		for (let at = 0; at < batch.length; at++) {
 			const index = batch[at];
 			const source = built[at];
@@ -663,7 +674,11 @@ export class SearchModal extends Modal {
 			if (source.snippets.length === 0) continue;
 			this.items[index] = { ...current, snippets: source.snippets };
 			this.cards.get(index)?.update(this.cardModel(index));
+			wrote = true;
 		}
+		// The cards just grew by however many lines their excerpts carry; the
+		// spacers still describe the height they had while they were blank.
+		if (wrote) this.refreshRowMetrics();
 	}
 
 	/** Un-claims the rows of a cancelled batch that came back empty, so a later window asks again. */
@@ -703,14 +718,32 @@ export class SearchModal extends Modal {
 	/* List rendering and virtualization                                      */
 	/* ---------------------------------------------------------------------- */
 
+	/**
+	 * Recomputes the rendered window and, when it moved, rebuilds it.
+	 *
+	 * The first pass runs on {@link DEFAULT_ROW_HEIGHT} — no card exists yet to
+	 * measure — and `renderWindow` measures a real card at the end of it. With a
+	 * five-line excerpt the estimate and the measurement are a factor of two
+	 * apart, so the window that first pass produced can be the wrong size. It is
+	 * therefore recomputed once against the measurement, and never in a loop: the
+	 * second pass already has the real number, so a third would compute the same
+	 * window and stop anyway.
+	 */
 	private updateWindow(force: boolean): void {
 		const total = this.items.length;
-		const next = this.computeWindow(total);
-		if (!force && next.start === this.windowStart && next.end === this.windowEnd) return;
-		this.windowStart = next.start;
-		this.windowEnd = next.end;
+		const first = this.computeWindow(total);
+		if (!force && first.start === this.windowStart && first.end === this.windowEnd) return;
+		this.windowStart = first.start;
+		this.windowEnd = first.end;
 		this.renderWindow();
-		this.restartSnippets(indexRange(next.start, next.end));
+
+		const corrected = this.computeWindow(total);
+		if (corrected.start !== this.windowStart || corrected.end !== this.windowEnd) {
+			this.windowStart = corrected.start;
+			this.windowEnd = corrected.end;
+			this.renderWindow();
+		}
+		this.restartSnippets(indexRange(this.windowStart, this.windowEnd));
 	}
 
 	/**
@@ -779,12 +812,46 @@ export class SearchModal extends Modal {
 		this.updateActiveDescendant();
 	}
 
-	/** Uses the first rendered card to replace the estimate, once the layout is real. */
-	private measureRowHeight(): void {
-		const first = this.cards.get(this.windowStart);
-		if (first === undefined) return;
-		const height = first.el.offsetHeight;
-		if (height > 0) this.rowHeight = height + CARD_GAP;
+	/**
+	 * Replaces the estimate with the average height of the cards on screen.
+	 *
+	 * The AVERAGE, not the first card: a card whose excerpts have not arrived yet
+	 * is the height of its blank snippet area, and a card carrying two five-line
+	 * excerpts is well over twice that. Measuring only the first row therefore
+	 * pinned the row height to whichever of those the top of the window happened
+	 * to be, and every spacer below it inherited the error — a few dozen pixels
+	 * with the old 160-character window, a few hundred per row with five lines.
+	 *
+	 * Returns true when the value moved far enough to be worth acting on.
+	 */
+	private measureRowHeight(): boolean {
+		let total = 0;
+		let counted = 0;
+		for (const card of this.cards.values()) {
+			const height = card.el.offsetHeight;
+			if (height <= 0) continue;
+			total += height;
+			counted++;
+		}
+		if (counted === 0) return false;
+		const next = total / counted + CARD_GAP;
+		if (Math.abs(next - this.rowHeight) < ROW_HEIGHT_EPSILON) return false;
+		this.rowHeight = next;
+		return true;
+	}
+
+	/**
+	 * Re-measures after excerpts landed and corrects the spacers if the cards grew.
+	 *
+	 * Only the spacers: rebuilding the window here would abort the snippet run
+	 * that is writing into it, one batch at a time, for as long as the cards keep
+	 * growing. The window itself follows on the next scroll or selection, which is
+	 * the first moment its size matters again.
+	 */
+	private refreshRowMetrics(): void {
+		if (!this.measureRowHeight()) return;
+		this.setSpacer(this.topSpacerEl, this.windowStart * this.rowHeight);
+		this.setSpacer(this.bottomSpacerEl, Math.max(0, this.items.length - this.windowEnd) * this.rowHeight);
 	}
 
 	private setSpacer(el: HTMLElement | null, height: number): void {
@@ -811,7 +878,6 @@ export class SearchModal extends Modal {
 			selected: index === this.selected,
 			dateLabel: ResultCard.formatDate(item.createdAt, dateFormatLocale()),
 			folderLabel: ResultCard.formatFolder(item.folder),
-			animateSelection: this.deps.settings.highlightSelectedCard,
 		};
 	}
 

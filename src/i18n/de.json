@@ -31,6 +31,9 @@
 	"filter.quick30Days": "Letzte 30 Tage",
 	"filter.quickYear": "Letztes Jahr",
 	"filter.quickAnyTime": "Ganzer Zeitraum",
+	"filter.previousMonth": "Vorheriger Monat",
+	"filter.nextMonth": "Nächster Monat",
+	"filter.clearRange": "Zeitraum entfernen",
 	"filter.show": "Filter einblenden",
 	"filter.hide": "Filter ausblenden",
 
@@ -112,8 +115,6 @@
 	"settings.fuzzyByDefault.desc": "Startet jede Suche mit eingeschaltetem Schalter für ähnliche Treffer.",
 	"settings.includeSubfolders.name": "Unterordner standardmässig einbeziehen",
 	"settings.includeSubfolders.desc": "Startet jede Suche mit den Unterordnern des gewählten Ordners.",
-	"settings.highlightSelectedCard.name": "Ausgewählten Treffer hervorheben",
-	"settings.highlightSelectedCard.desc": "Vergrössert die ausgewählte Karte leicht. Ausschalten, wenn die Schrift dadurch weich wirkt.",
 	"settings.maxResults.name": "Maximale Trefferzahl",
 	"settings.maxResults.desc": "Obergrenze der angezeigten Treffer pro Suche, zwischen 20 und 1000.",
 

@@ -541,9 +541,31 @@ export interface ScoreBreakdown {
  * `text` is cut from the ORIGINAL file text, never from the normalized form —
  * that is the whole reason the offset contract exists. Umlauts, casing and
  * markdown appear as the user wrote them.
+ *
+ * ---------------------------------------------------------------------------
+ * AN EXCERPT IS WHOLE LINES, AND STILL ONE CONTIGUOUS SLICE
+ * ---------------------------------------------------------------------------
+ * The cut runs on LINE boundaries: the line the match sits on plus its
+ * neighbours, at most {@link SiftTuning.snippetLines} lines and never leaving
+ * the block the match is in. So `text` normally CONTAINS LINE BREAKS — `\n` or
+ * `\r\n`, exactly as the file spells them — and the card renders each as a
+ * break rather than collapsing it to a space.
+ *
+ * There is deliberately no separate line list. `text` stays
+ * `original.slice(offset, offset + text.length)`: one contiguous range, not a
+ * stitched-together set of lines. That is what keeps every offset in this object
+ * trivially true — `marks[i]` is relative to `text`, `offset + marks[0].start`
+ * is the position in the file, and {@link Snippet.jumpOffset} is exactly that —
+ * and it makes the breaks findable in `text` itself, so a second, redundant
+ * description of them cannot drift out of step with it. A line too long for the
+ * character ceiling is therefore narrowed at its ends rather than folded, so the
+ * contiguity holds for a 4 000-character line too.
  */
 export interface Snippet {
-	/** The excerpt itself, roughly {@link SiftTuning.snippetLength} characters. */
+	/**
+	 * The excerpt itself: up to {@link SiftTuning.snippetLines} whole lines,
+	 * each at most about {@link SiftTuning.snippetLength} characters.
+	 */
 	text: string;
 	/** Offset of `text[0]` in the original file. */
 	offset: OriginalOffset;
@@ -586,8 +608,6 @@ export interface SiftSettings {
 	fuzzyByDefault: boolean;
 	/** Initial state of the "Include subfolders" toggle. Default `true`. */
 	includeSubfoldersByDefault: boolean;
-	/** `transform: scale(1.02)` on the selected card. Default `true`; off for anyone who dislikes the resampling. */
-	highlightSelectedCard: boolean;
 	/** Hard cap on rendered hits. Default 200 — the point at which the list virtualizes. */
 	maxResults: number;
 	/** Rebuild the index from scratch on next load; set by the "Rebuild index" button, cleared by the Indexer. */
@@ -607,11 +627,31 @@ export interface SiftTuning {
 	maxTermVariants: number;
 	/** Longest accepted query string. Default 512. */
 	maxQueryLength: number;
-	/** Target snippet length in characters. Default 160. */
+	/** Character ceiling for ONE LINE of a snippet. Default 160. A longer line is narrowed around the match. */
 	snippetLength: number;
-	/** Trigram-similarity floor for fuzzy candidates, per plan section 3.1. Default 0.6. */
-	fuzzyTrigramSimilarity: number;
-	/** Damerau-Levenshtein budget for terms up to `fuzzyShortTermMaxLength`. Default 1. */
+	/** Lines one excerpt may span, the matched line included. Default 5. */
+	snippetLines: number;
+	/**
+	 * Damerau-Levenshtein budget for terms up to `fuzzyShortTermMaxLength`.
+	 * Default 1.
+	 *
+	 * THERE IS NO TRIGRAM-SIMILARITY FLOOR HERE, AND THERE MUST NOT BE ONE AGAIN
+	 * -------------------------------------------------------------------------
+	 * A `fuzzyTrigramSimilarity` of 0.6 used to sit next to these three. It
+	 * measured the SHARE of the term's trigrams a file supplies, and a share is
+	 * the wrong shape for this filter: one edit destroys up to three trigrams
+	 * whatever the term's length, so the surviving share shrinks as the term gets
+	 * shorter. "kaffeemschine" kept 9 of 11 (0.82) and passed; "heizng" kept 2 of
+	 * 4 (0.50) and "pmpe" 1 of 2 (0.50), and both were rejected before the
+	 * distance check ever ran — which is exactly the bug the owner reported, a
+	 * dropped letter finding nothing.
+	 *
+	 * The trigram pass is a cheap RECALL pre-filter and the distance pass below
+	 * is the precision gate, so the pre-filter is now derived from these budgets
+	 * instead of from a constant: a word within distance `d` of a term with `t`
+	 * trigrams still shares at least `t - 3d` of them. See
+	 * `Searcher.sharedTrigramFloor`.
+	 */
 	fuzzyMaxDistanceShort: number;
 	/** Damerau-Levenshtein budget above that length. Default 2. */
 	fuzzyMaxDistanceLong: number;
@@ -722,8 +762,6 @@ export interface ResultCardModel {
 	dateLabel: string;
 	/** Folder path shown under the title, e.g. "Projekte / 2026 / Büro-Umbau". */
 	folderLabel: string;
-	/** Apply `transform: scale(1.02)` to the selected card. Mirrors {@link SiftSettings.highlightSelectedCard}. */
-	animateSelection: boolean;
 }
 
 /** What a card reports upward. */

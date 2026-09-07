@@ -3,15 +3,35 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { TFolder, installDomHelpers } from '../stubs/obsidian';
 import type { App } from 'obsidian';
-import { FilterBar, quickPickFrom } from '../../src/ui/FilterBar';
+import {
+	FilterBar,
+	addDays,
+	addMonths,
+	endOfDay,
+	firstWeekday,
+	leadingBlanks,
+	normalizeRange,
+	quickPickRange,
+	startOfDay,
+} from '../../src/ui/FilterBar';
 import { setLanguage, t } from '../../src/i18n/index';
-import type { FilterBarCallbacks, FilterBarState, SearchFilters, SortKey } from '../../src/types';
+import type { FilterBarCallbacks, FilterBarState, Millis, SearchFilters, SortKey } from '../../src/types';
 
 installDomHelpers();
 
-const DAY = 86_400_000;
-/** A fixed clock, so a quick pick is a plain subtraction and not "roughly now". */
-const NOW = Date.UTC(2026, 8, 7, 10, 0, 0);
+/**
+ * A fixed clock, in LOCAL time.
+ *
+ * Every bound the bar produces is a local day boundary, so a fixture built with
+ * `Date.UTC` would name a different calendar day depending on where the test
+ * runs. Monday, 7 September 2026, 10:00.
+ */
+const NOW = new Date(2026, 8, 7, 10, 0, 0, 0).getTime();
+
+/** Local midnight of a calendar date, written the way a reader says it: month 1-12. */
+function local(year: number, month: number, day: number): Millis {
+	return new Date(year, month - 1, day, 0, 0, 0, 0).getTime();
+}
 
 interface Harness {
 	bar: FilterBar;
@@ -80,6 +100,42 @@ function mount(state: FilterBarState = baseState()): Harness {
 function menuHandlers(h: Harness, key: string): Array<(evt: KeyboardEvent) => unknown> {
 	const scope = h.pushedScopes[0] as { keys?: Array<{ key: string | null; handler: (evt: KeyboardEvent) => unknown }> };
 	return (scope?.keys ?? []).filter((entry) => entry.key === key).map((entry) => entry.handler);
+}
+
+/**
+ * Presses a key on the popover's scope, the way Obsidian's keymap would: the
+ * bindings are tried in registration order and the first one that reports the
+ * event handled stops the walk.
+ */
+function press(h: Harness, key: string): void {
+	const scope = h.pushedScopes[0] as { keys?: Array<{ key: string | null; handler: (evt: KeyboardEvent) => unknown }> };
+	const event = new KeyboardEvent('keydown', { key, bubbles: true });
+	for (const entry of scope?.keys ?? []) {
+		if (entry.key !== null && entry.key !== key) continue;
+		if (entry.handler(event) === false) return;
+	}
+}
+
+/** Opens the created-date popover. */
+function openDates(h: Harness): void {
+	button(h.bar, '.sift-chip--date').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+/** The day button carrying `dayOfMonth` in the month currently on display. */
+function day(bar: FilterBar, dayOfMonth: number): HTMLElement {
+	const cells = Array.from(bar.el.querySelectorAll<HTMLElement>('.sift-cal__day'));
+	const found = cells.find((cell) => cell.textContent === String(dayOfMonth));
+	if (found === undefined) throw new Error(`day ${dayOfMonth} is not in the rendered month`);
+	return found;
+}
+
+function clickDay(bar: FilterBar, dayOfMonth: number): void {
+	day(bar, dayOfMonth).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+}
+
+/** The day numbers carrying `cls`, in grid order. */
+function daysWith(bar: FilterBar, cls: string): string[] {
+	return Array.from(bar.el.querySelectorAll<HTMLElement>(`.${cls}`)).map((cell) => cell.textContent ?? '');
 }
 
 function input(bar: FilterBar, selector: string): HTMLInputElement {
@@ -159,11 +215,14 @@ describe('folder input', () => {
 });
 
 describe('quick picks', () => {
-	it('computes the lower bound against the injected clock', () => {
-		expect(quickPickFrom('week', NOW)).toBe(NOW - 7 * DAY);
-		expect(quickPickFrom('month', NOW)).toBe(NOW - 30 * DAY);
-		expect(quickPickFrom('year', NOW)).toBe(NOW - 365 * DAY);
-		expect(quickPickFrom('any', NOW)).toBeNull();
+	it('computes both bounds against the injected clock, day-aligned and inclusive', () => {
+		expect(quickPickRange('week', NOW)).toEqual({
+			createdFrom: local(2026, 8, 31),
+			createdTo: new Date(2026, 8, 7, 23, 59, 59, 999).getTime(),
+		});
+		expect(quickPickRange('month', NOW).createdFrom).toBe(local(2026, 8, 8));
+		expect(quickPickRange('year', NOW).createdFrom).toBe(local(2025, 9, 7));
+		expect(quickPickRange('any', NOW)).toEqual({ createdFrom: null, createdTo: null });
 	});
 
 	it('applies each quick pick and clears both bounds from the chip remove button', () => {
@@ -172,21 +231,39 @@ describe('quick picks', () => {
 		expect(items.length).toBe(4);
 
 		items[0].dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[0].createdFrom).toBe(NOW - 7 * DAY);
-		expect(h.filters[0].createdTo).toBeNull();
+		expect(h.filters[0].createdFrom).toBe(local(2026, 8, 31));
+		expect(h.filters[0].createdTo).toBe(endOfDay(NOW));
 
 		items[1].dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[1].createdFrom).toBe(NOW - 30 * DAY);
+		expect(h.filters[1].createdFrom).toBe(local(2026, 8, 8));
 
 		items[2].dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[2].createdFrom).toBe(NOW - 365 * DAY);
+		expect(h.filters[2].createdFrom).toBe(local(2025, 9, 7));
 
 		button(h.bar, '.sift-chip__remove--date').dispatchEvent(new MouseEvent('click'));
 		expect(h.filters[3].createdFrom).toBeNull();
 		expect(h.filters[3].createdTo).toBeNull();
 	});
 
-	it('opens and closes the quick-pick menu without losing filter values', () => {
+	it('leaves the popover open so the calendar shows what the quick pick selected', () => {
+		const h = mount();
+		const wrap = button(h.bar, '.sift-filters__date');
+		openDates(h);
+
+		button(h.bar, '.sift-date-menu__item').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+		// A pick whose result is invisible is a pick you have to reopen the
+		// popover to check, so the popover stays where it is.
+		expect(wrap.hasClass('sift-filters__date--open')).toBe(true);
+		// "Last 7 days" from Monday 7 September reaches back to 31 August, and the
+		// view stays on the month it was already showing rather than following the
+		// start into August.
+		expect(button(h.bar, '.sift-cal__month').textContent).toContain('September');
+		expect(daysWith(h.bar, 'sift-cal__day--end')).toEqual(['7']);
+		expect(daysWith(h.bar, 'sift-cal__day--inside')).toEqual(['1', '2', '3', '4', '5', '6']);
+	});
+
+	it('opens and closes the popover without losing filter values', () => {
 		const h = mount(baseState({ filters: baseFilters({ folder: 'Projekte', includeSubfolders: false }) }));
 		const wrap = button(h.bar, '.sift-filters__date');
 		const chip = button(h.bar, '.sift-chip--date');
@@ -201,7 +278,7 @@ describe('quick picks', () => {
 		expect(input(h.bar, '.sift-toggle--subfolders .sift-toggle__input').checked).toBe(false);
 	});
 
-	it('closes the open menu on a click outside it', () => {
+	it('closes the open popover on a click outside it', () => {
 		const h = mount();
 		const wrap = button(h.bar, '.sift-filters__date');
 		const outside = document.body.createDiv();
@@ -209,13 +286,10 @@ describe('quick picks', () => {
 		button(h.bar, '.sift-chip--date').dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(wrap.hasClass('sift-filters__date--open')).toBe(true);
 
-		// A click inside the menu is not "outside": the quick pick has to survive
-		// long enough to run its own handler.
+		// A click inside the popover is not "outside": the quick pick has to
+		// survive long enough to run its own handler, and the popover stays open.
 		button(h.bar, '.sift-date-menu__item').dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(h.filters.length).toBe(1);
-		expect(wrap.hasClass('sift-filters__date--open')).toBe(false);
-
-		button(h.bar, '.sift-chip--date').dispatchEvent(new MouseEvent('click', { bubbles: true }));
 		expect(wrap.hasClass('sift-filters__date--open')).toBe(true);
 
 		outside.dispatchEvent(new MouseEvent('click', { bubbles: true }));
@@ -257,6 +331,324 @@ describe('quick picks', () => {
 
 		// A document click after destroy must not reach a detached bar.
 		expect(() => document.body.dispatchEvent(new MouseEvent('click', { bubbles: true }))).not.toThrow();
+	});
+});
+
+/* -------------------------------------------------------------------------- */
+/* Calendar                                                                   */
+/* -------------------------------------------------------------------------- */
+
+describe('calendar arithmetic', () => {
+	it('puts the day boundaries where the filter needs them', () => {
+		const noon = new Date(2026, 8, 14, 12, 30, 15, 250).getTime();
+		expect(startOfDay(noon)).toBe(local(2026, 9, 14));
+		expect(endOfDay(noon)).toBe(new Date(2026, 8, 14, 23, 59, 59, 999).getTime());
+		// The end is inclusive, so the last moment of the day is inside the range
+		// and the first moment of the next one is not.
+		expect(new Date(2026, 8, 14, 23, 59, 0, 0).getTime()).toBeLessThanOrEqual(endOfDay(noon));
+		expect(local(2026, 9, 15)).toBeGreaterThan(endOfDay(noon));
+	});
+
+	it('steps days and months across a DST switch and a short month', () => {
+		// Central European summer time ends on 25 October 2026; a plain +86400000
+		// lands an hour earlier and, after a startOfDay, on the previous date.
+		expect(addDays(local(2026, 10, 25), 1)).toBe(local(2026, 10, 26));
+		expect(addDays(local(2026, 3, 29), -1)).toBe(local(2026, 3, 28));
+		expect(addDays(local(2026, 3, 1), -1)).toBe(local(2026, 2, 28));
+		expect(addMonths(local(2026, 1, 31), 1)).toBe(local(2026, 2, 28));
+		expect(addMonths(local(2026, 8, 31), 1)).toBe(local(2026, 9, 30));
+		expect(addMonths(local(2026, 1, 15), -1)).toBe(local(2025, 12, 15));
+	});
+
+	it('takes the first weekday from the locale rather than from a list', () => {
+		expect(firstWeekday('de')).toBe(1);
+		expect(firstWeekday('de-CH')).toBe(1);
+		expect(firstWeekday('en')).toBe(7);
+		// Same language, different week: this is why the value is asked for and
+		// not tabulated by language.
+		expect(firstWeekday('en-GB')).toBe(1);
+		// A tag the runtime cannot parse still has to produce a calendar.
+		expect(firstWeekday('not a locale')).toBe(1);
+	});
+
+	it('counts the leading blanks of a month against the locale week start', () => {
+		// 1 November 2026 is a Sunday: six blanks in a Monday-first week, none in
+		// a Sunday-first one.
+		expect(leadingBlanks(local(2026, 11, 1), 1)).toBe(6);
+		expect(leadingBlanks(local(2026, 11, 1), 7)).toBe(0);
+		expect(leadingBlanks(local(2026, 9, 1), 1)).toBe(1);
+	});
+
+	it('puts a reversed pair back in order and leaves an open one alone', () => {
+		const early = local(2026, 9, 10);
+		const late = local(2026, 9, 20);
+		expect(normalizeRange(late, early)).toEqual({ from: early, to: late });
+		expect(normalizeRange(early, late)).toEqual({ from: early, to: late });
+		expect(normalizeRange(early, null)).toEqual({ from: early, to: null });
+		expect(normalizeRange(null, late)).toEqual({ from: null, to: late });
+	});
+});
+
+describe('calendar grid', () => {
+	it('lays a month out with the leading blanks its locale asks for', () => {
+		setLanguage('de');
+		// November 2026 starts on a Sunday, and a German week starts on Monday.
+		const h = mount(baseState({ filters: baseFilters({ createdFrom: local(2026, 11, 15) }) }));
+		openDates(h);
+
+		const cells = Array.from(h.bar.el.querySelectorAll('.sift-cal__grid .sift-cal__week:not(.sift-cal__week--head) > *'));
+		const firstDay = cells.findIndex((cell) => cell.classList.contains('sift-cal__day'));
+		expect(firstDay).toBe(6);
+		expect(cells.slice(0, 6).every((cell) => cell.classList.contains('sift-cal__blank'))).toBe(true);
+		expect(h.bar.el.querySelectorAll('.sift-cal__day').length).toBe(30);
+		expect(button(h.bar, '.sift-cal__month').textContent).toBe('November 2026');
+
+		// The column headings come from Intl, in the locale's own order.
+		const weekdays = Array.from(h.bar.el.querySelectorAll('.sift-cal__weekday')).map((el) => el.textContent);
+		expect(weekdays.length).toBe(7);
+		expect(weekdays[0]).toBe(new Intl.DateTimeFormat('de', { weekday: 'short' }).format(new Date(2024, 0, 1)));
+		expect(weekdays[6]).toBe(new Intl.DateTimeFormat('de', { weekday: 'short' }).format(new Date(2024, 0, 7)));
+	});
+
+	it('starts the week on Sunday in English, with no leading blank for that same month', () => {
+		setLanguage('en');
+		const h = mount(baseState({ filters: baseFilters({ createdFrom: local(2026, 11, 15) }) }));
+		openDates(h);
+
+		const cells = Array.from(h.bar.el.querySelectorAll('.sift-cal__grid .sift-cal__week:not(.sift-cal__week--head) > *'));
+		expect(cells[0].classList.contains('sift-cal__day')).toBe(true);
+		expect(cells[0].textContent).toBe('1');
+	});
+
+	it('names every day for a screen reader and marks the range with aria-selected', () => {
+		const h = mount(baseState({ filters: baseFilters({ createdFrom: local(2026, 9, 10), createdTo: endOfDay(local(2026, 9, 12)) }) }));
+		openDates(h);
+
+		expect(day(h.bar, 10).getAttribute('aria-label')).toBe(
+			new Intl.DateTimeFormat('en', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+				.format(new Date(2026, 8, 10)),
+		);
+		expect(day(h.bar, 10).getAttribute('role')).toBe('gridcell');
+		expect(day(h.bar, 10).getAttribute('aria-selected')).toBe('true');
+		expect(day(h.bar, 11).getAttribute('aria-selected')).toBe('true');
+		expect(day(h.bar, 12).getAttribute('aria-selected')).toBe('true');
+		expect(day(h.bar, 13).getAttribute('aria-selected')).toBe('false');
+		expect(daysWith(h.bar, 'sift-cal__day--start')).toEqual(['10']);
+		expect(daysWith(h.bar, 'sift-cal__day--inside')).toEqual(['11']);
+		expect(daysWith(h.bar, 'sift-cal__day--end')).toEqual(['12']);
+	});
+
+	it('draws a reversed pair the right way round', () => {
+		const h = mount(
+			baseState({ filters: baseFilters({ createdFrom: local(2026, 9, 20), createdTo: endOfDay(local(2026, 9, 10)) }) }),
+		);
+		openDates(h);
+
+		expect(daysWith(h.bar, 'sift-cal__day--start')).toEqual(['10']);
+		expect(daysWith(h.bar, 'sift-cal__day--end')).toEqual(['20']);
+	});
+});
+
+describe('picking a range', () => {
+	it('sets the start on the first click and the end on the second', () => {
+		const h = mount();
+		openDates(h);
+
+		clickDay(h.bar, 10);
+		expect(h.filters.length).toBe(1);
+		expect(h.filters[0].createdFrom).toBe(local(2026, 9, 10));
+		expect(h.filters[0].createdTo).toBeNull();
+		expect(daysWith(h.bar, 'sift-cal__day--start')).toEqual(['10']);
+		expect(daysWith(h.bar, 'sift-cal__day--end')).toEqual([]);
+
+		clickDay(h.bar, 14);
+		expect(h.filters.length).toBe(2);
+		expect(h.filters[1].createdFrom).toBe(local(2026, 9, 10));
+		expect(h.filters[1].createdTo).toBe(new Date(2026, 8, 14, 23, 59, 59, 999).getTime());
+		expect(daysWith(h.bar, 'sift-cal__day--inside')).toEqual(['11', '12', '13']);
+	});
+
+	it('includes a note written at 23:59 on the closing day', () => {
+		const h = mount();
+		openDates(h);
+		clickDay(h.bar, 10);
+		clickDay(h.bar, 14);
+
+		const bound = h.filters[1].createdTo ?? 0;
+		const lateOnTheDay = new Date(2026, 8, 14, 23, 59, 0, 0).getTime();
+		const justAfter = new Date(2026, 8, 15, 0, 0, 0, 0).getTime();
+		// The Searcher rejects on `createdAt > createdTo`, so these two comparisons
+		// are the filter itself.
+		expect(lateOnTheDay > bound).toBe(false);
+		expect(justAfter > bound).toBe(true);
+	});
+
+	it('restarts the range when the second click lands before the start', () => {
+		const h = mount();
+		openDates(h);
+
+		clickDay(h.bar, 10);
+		clickDay(h.bar, 5);
+		expect(h.filters[1].createdFrom).toBe(local(2026, 9, 5));
+		expect(h.filters[1].createdTo).toBeNull();
+		expect(daysWith(h.bar, 'sift-cal__day--start')).toEqual(['5']);
+
+		clickDay(h.bar, 8);
+		expect(h.filters[2].createdFrom).toBe(local(2026, 9, 5));
+		expect(h.filters[2].createdTo).toBe(new Date(2026, 8, 8, 23, 59, 59, 999).getTime());
+	});
+
+	it('previews the range under the pointer once a start is set', () => {
+		const h = mount();
+		openDates(h);
+
+		// Nothing to preview before the first click.
+		day(h.bar, 12).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+		expect(daysWith(h.bar, 'sift-cal__day--preview')).toEqual([]);
+
+		clickDay(h.bar, 10);
+		day(h.bar, 13).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+		expect(daysWith(h.bar, 'sift-cal__day--inside')).toEqual(['11', '12']);
+		expect(daysWith(h.bar, 'sift-cal__day--end')).toEqual(['13']);
+		expect(daysWith(h.bar, 'sift-cal__day--preview')).toEqual(['11', '12', '13']);
+		// Hovering is not deciding.
+		expect(h.filters.length).toBe(1);
+
+		// A pointer before the start previews nothing rather than a backwards range.
+		day(h.bar, 4).dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+		expect(daysWith(h.bar, 'sift-cal__day--preview')).toEqual([]);
+	});
+
+	it('writes the same two fields the quick picks write', () => {
+		const h = mount();
+		openDates(h);
+		clickDay(h.bar, 1);
+		clickDay(h.bar, 7);
+		const picked = h.filters[1];
+
+		button(h.bar, '.sift-date-menu__item').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		const quick = h.filters[2];
+
+		expect(Object.keys(picked).sort()).toEqual(Object.keys(quick).sort());
+		expect(typeof picked.createdFrom).toBe(typeof quick.createdFrom);
+		expect(picked.createdTo).toBe(endOfDay(local(2026, 9, 7)));
+		expect(quick.createdTo).toBe(endOfDay(NOW));
+	});
+
+	it('clears both bounds from the calendar', () => {
+		const h = mount(baseState({ filters: baseFilters({ createdFrom: local(2026, 9, 10) }) }));
+		openDates(h);
+		button(h.bar, '.sift-cal__clear').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+		expect(h.filters[0].createdFrom).toBeNull();
+		expect(h.filters[0].createdTo).toBeNull();
+		expect(daysWith(h.bar, 'sift-cal__day--start')).toEqual([]);
+	});
+});
+
+describe('calendar keyboard', () => {
+	/** The day the roving tab stop currently sits on. */
+	function cursor(h: Harness): string {
+		const cells = Array.from(h.bar.el.querySelectorAll<HTMLElement>('.sift-cal__day'));
+		return cells.find((cell) => cell.getAttribute('tabindex') === '0')?.textContent ?? '';
+	}
+
+	it('moves by day and by week, and wraps into the neighbouring month', () => {
+		const h = mount();
+		openDates(h);
+		expect(cursor(h)).toBe('7');
+
+		press(h, 'ArrowRight');
+		expect(cursor(h)).toBe('8');
+		press(h, 'ArrowDown');
+		expect(cursor(h)).toBe('15');
+		press(h, 'ArrowUp');
+		expect(cursor(h)).toBe('8');
+
+		// Backwards off the first of the month: the grid has to follow.
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		press(h, 'ArrowLeft');
+		expect(button(h.bar, '.sift-cal__month').textContent).toContain('August');
+		expect(cursor(h)).toBe('31');
+
+		// And forwards off the last one.
+		press(h, 'ArrowRight');
+		expect(button(h.bar, '.sift-cal__month').textContent).toContain('September');
+		expect(cursor(h)).toBe('1');
+	});
+
+	it('moves by month with PageUp and PageDown, clamping a day the month does not have', () => {
+		const h = mount(baseState({ filters: baseFilters({ createdFrom: local(2026, 8, 31) }) }));
+		openDates(h);
+		expect(cursor(h)).toBe('31');
+
+		press(h, 'PageDown');
+		expect(button(h.bar, '.sift-cal__month').textContent).toContain('September');
+		expect(cursor(h)).toBe('30');
+
+		press(h, 'PageUp');
+		expect(button(h.bar, '.sift-cal__month').textContent).toContain('August');
+		expect(cursor(h)).toBe('30');
+	});
+
+	it('picks the day under the cursor with Enter', () => {
+		const h = mount();
+		openDates(h);
+
+		press(h, 'ArrowRight');
+		press(h, 'Enter');
+		expect(h.filters.length).toBe(1);
+		expect(h.filters[0].createdFrom).toBe(local(2026, 9, 8));
+
+		press(h, 'ArrowRight');
+		press(h, 'Enter');
+		expect(h.filters[1].createdTo).toBe(endOfDay(local(2026, 9, 9)));
+	});
+
+	it('leaves the filter untouched on Escape', () => {
+		const h = mount();
+		openDates(h);
+		const wrap = button(h.bar, '.sift-filters__date');
+
+		press(h, 'Escape');
+		expect(wrap.hasClass('sift-filters__date--open')).toBe(false);
+		expect(h.filters.length).toBe(0);
+		expect(h.pushedScopes.length).toBe(0);
+	});
+
+	it('hands every key it does not own back to Obsidian', () => {
+		const h = mount();
+		openDates(h);
+		const scope = h.pushedScopes[0] as {
+			keys: Array<{ key: string | null; handler: (evt: KeyboardEvent) => unknown }>;
+		};
+		const catchAll = scope.keys.filter((entry) => entry.key === null);
+		expect(catchAll.length).toBe(1);
+
+		// A letter, a modifier combination and a key the calendar has no use for
+		// all come back unhandled, so the global hotkeys keep working.
+		for (const key of ['k', 'F5', 'Home']) {
+			expect(catchAll[0].handler(new KeyboardEvent('keydown', { key }))).toBe(true);
+		}
+		expect(h.filters.length).toBe(0);
+	});
+
+	it('ignores the calendar keys while the popover is closed', () => {
+		const h = mount();
+		openDates(h);
+		const scope = h.pushedScopes[0] as {
+			keys: Array<{ key: string | null; handler: (evt: KeyboardEvent) => unknown }>;
+		};
+		const catchAll = scope.keys.filter((entry) => entry.key === null)[0];
+		h.bar.destroy();
+
+		expect(catchAll.handler(new KeyboardEvent('keydown', { key: 'ArrowRight' }))).toBe(true);
 	});
 });
 

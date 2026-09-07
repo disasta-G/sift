@@ -2,11 +2,42 @@
  * Snippets — builds the 1-3 excerpts per card.
  *
  * Reads the ORIGINAL text through vault.cachedRead (the normalized text is
- * never shown to the user), cuts ~160 characters around the best-spread
+ * never shown to the user), cuts up to five whole LINES around the best-spread
  * matches, snaps the edges to word boundaries, marks the match ranges and
  * identifies the sentence around the primary match so the card can render it
  * in --text-normal while the rest stays --text-muted. Runs for the visible
  * window only, which is why it is async.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY LINES AND NOT A CHARACTER WINDOW
+ * ---------------------------------------------------------------------------
+ * The excerpt used to be a `snippetLength`-wide window centred on the match,
+ * which shows the hit but not what it is part of: a list item without its list,
+ * half a sentence, a value without the line that names it. The owner asked to
+ * see the hit IN CONTEXT, so the cut now runs on line boundaries — the line the
+ * match sits on plus its neighbours, at most {@link SiftTuning.snippetLines}
+ * lines, and still clamped to the block the match is in.
+ *
+ * Three rules keep that from swallowing the list:
+ *
+ *  - LINES AFTER BEAT LINES BEFORE. A hit usually introduces what follows, so
+ *    the spare budget is split with the remainder going downward, and whatever
+ *    one side cannot use (the match is on the block's first line, say) goes to
+ *    the other.
+ *  - A CHARACTER CEILING OF `snippetLength` PER LINE SHOWN. A note written one
+ *    paragraph per line is a single 4 000-character line, and five of those
+ *    would be the whole note. Context lines are dropped from the far end first;
+ *    a single line that is still too long is narrowed around the match, which is
+ *    the one case an excerpt does not begin and end on a line boundary.
+ *  - `snippetCount` STILL APPLIES. Five lines is the size of ONE excerpt, not a
+ *    replacement for the 1-3 excerpts a card shows.
+ *
+ * The excerpt stays ONE CONTIGUOUS SLICE of the file — see the note on
+ * {@link Snippet} — so every offset in the result keeps meaning what it did.
+ * The line structure is therefore carried by `text` itself, which now holds the
+ * file's own `\n` (or `\r\n`) where the breaks are; the card renders those as
+ * breaks instead of collapsing them to a space. No second, redundant list of
+ * line spans exists that could drift out of step with the text.
  *
  * ---------------------------------------------------------------------------
  * WHY THE ORIGINAL TEXT AND NOTHING ELSE
@@ -74,6 +105,9 @@ const CLUSTER_WINDOW = 160;
 
 /** Shortest excerpt worth cutting, whatever the tuning says. */
 const MIN_SNIPPET_LENGTH = 24;
+
+/** Fallback for {@link SiftTuning.snippetLines} when the tuning object carries nonsense. */
+const DEFAULT_SNIPPET_LINES = 5;
 
 /** How far an edge may travel to reach a word boundary before it gives up and cuts where it stood. */
 const MAX_WORD_SNAP = 32;
@@ -320,41 +354,31 @@ export class Snippets {
 			if (match.end > clusterEnd) clusterEnd = match.end;
 		}
 
-		const target = Math.max(MIN_SNIPPET_LENGTH, this.targetLength(), clusterEnd - clusterStart);
-		const centre = Math.round((clusterStart + clusterEnd) / 2);
-		let cutStart = centre - Math.floor(target / 2);
-		let cutEnd = cutStart + target;
-		if (cutStart < 0) {
-			cutEnd -= cutStart;
-			cutStart = 0;
-		}
-		if (cutEnd > length) {
-			cutStart = Math.max(0, cutStart - (cutEnd - length));
-			cutEnd = length;
-		}
+		const maxLines = this.lineBudget();
+		const perLine = this.targetLength();
 
-		// One block per excerpt: the window may not reach back into the
-		// frontmatter or across a heading. Scanned only around the window, so the
-		// cost is the window's length and not the file's. A block edge is treated
-		// exactly like the edge of the file above — what one side loses, the other
-		// side gains, so an excerpt inside a long block still reaches its target.
+		// One block per excerpt: the excerpt may not reach back into the
+		// frontmatter or across a heading. The scan is bounded by the widest
+		// excerpt this cut could produce — a full line budget in each direction —
+		// so it costs the excerpt's length and not the file's.
 		const block = blockAround(
 			original,
 			clusterStart,
 			clusterEnd,
-			Math.max(0, cutStart - MAX_WORD_SNAP),
-			Math.min(length, cutEnd + MAX_WORD_SNAP),
+			lineStartBefore(original, lineStartAt(original, clusterStart), maxLines),
+			lineEndAfter(original, lineEndAt(original, lastOffsetOf(clusterStart, clusterEnd)), maxLines),
 		);
-		if (cutStart < block.start) {
-			cutEnd = Math.min(block.end, cutEnd + (block.start - cutStart));
-			cutStart = block.start;
-		}
-		if (cutEnd > block.end) {
-			cutStart = Math.max(block.start, cutStart - (cutEnd - block.end));
-			cutEnd = block.end;
-		}
 
-		const snapped = Snippets.clampToWordBoundaries(original, { start: cutStart, end: cutEnd });
+		const chosen = fitToCeiling(
+			original,
+			lineWindow(original, block, clusterStart, clusterEnd, maxLines),
+			clusterStart,
+			clusterEnd,
+			maxLines,
+			perLine,
+		);
+
+		const snapped = Snippets.clampToWordBoundaries(original, chosen);
 		// The cluster is what this excerpt exists for; neither snapping nor the
 		// block clamp may cut into it.
 		let start = Math.min(Math.max(snapped.start, block.start), clusterStart);
@@ -382,10 +406,18 @@ export class Snippets {
 		};
 	}
 
-	/** Configured excerpt length, hardened against a hand-edited tuning object. */
+	/** Configured per-line character ceiling, hardened against a hand-edited tuning object. */
 	private targetLength(): number {
 		const configured = this.tuning.snippetLength;
-		return Number.isFinite(configured) ? Math.round(configured) : CLUSTER_WINDOW;
+		if (!Number.isFinite(configured)) return CLUSTER_WINDOW;
+		return Math.max(MIN_SNIPPET_LENGTH, Math.round(configured));
+	}
+
+	/** Configured line budget, hardened the same way. At least one line: the one the match sits on. */
+	private lineBudget(): number {
+		const configured = this.tuning.snippetLines;
+		if (!Number.isFinite(configured)) return DEFAULT_SNIPPET_LINES;
+		return Math.max(1, Math.round(configured));
 	}
 }
 
@@ -536,6 +568,142 @@ function blockAround(text: string, from: number, to: number, low: number, high: 
 	}
 
 	return { start, end };
+}
+
+/**
+ * The line window one excerpt shows, in ORIGINAL coordinates.
+ *
+ * It always contains every line the cluster touches. The rest of the budget is
+ * split so a line AFTER the match beats a line before it, and whatever one side
+ * cannot use — the match sits on the block's first line, the block ends two
+ * lines down — is handed to the other. Nothing ever leaves `block`.
+ */
+function lineWindow(text: string, block: Span, from: number, to: number, maxLines: number): Span {
+	const start = Math.max(block.start, lineStartAt(text, from));
+	const end = Math.max(start, Math.min(block.end, lineEndAt(text, lastOffsetOf(from, to))));
+
+	const spare = Math.max(0, maxLines - countLines(text, start, end));
+	// The remainder goes downward: `ceil` here, so a budget of 5 around a
+	// single matched line reads two lines up and two down, and a budget of 4
+	// reads one up and two down.
+	const after = growForward(text, end, block.end, Math.ceil(spare / 2));
+	const before = growBackward(text, start, block.start, spare - after.grown);
+	const rest = growForward(text, after.at, block.end, spare - after.grown - before.grown);
+	return { start: before.at, end: rest.at };
+}
+
+/**
+ * Applies the character ceiling — {@link SiftTuning.snippetLength} per line the
+ * excerpt shows — to a line window.
+ *
+ * Context lines go first, and a line before the match goes before a line after
+ * it, because the lines after are the ones the reader wants. What is left when
+ * only the matched line(s) remain is the one case an excerpt is not whole
+ * lines: it is narrowed around the match, which is what a 4 000-character
+ * paragraph-per-line note needs and what the character window did before.
+ */
+function fitToCeiling(
+	text: string,
+	window: Span,
+	from: number,
+	to: number,
+	maxLines: number,
+	perLine: number,
+): Span {
+	let start = window.start;
+	let end = window.end;
+	const matchStart = Math.max(start, lineStartAt(text, from));
+	const matchEnd = Math.min(end, lineEndAt(text, lastOffsetOf(from, to)));
+
+	for (;;) {
+		const ceiling = perLine * Math.min(maxLines, countLines(text, start, end));
+		if (end - start <= ceiling) return { start, end };
+		if (start < matchStart) {
+			start = Math.min(matchStart, nextLineStart(text, lineEndAt(text, start)));
+			continue;
+		}
+		if (end > matchEnd) {
+			end = Math.max(matchEnd, previousLineEnd(text, lineStartAt(text, end)));
+			continue;
+		}
+		break;
+	}
+
+	// Only the matched line(s) left, and still too long.
+	const target = Math.max(MIN_SNIPPET_LENGTH, perLine * Math.min(maxLines, countLines(text, start, end)), to - from);
+	const centre = Math.round((from + to) / 2);
+	let cutStart = centre - Math.floor(target / 2);
+	let cutEnd = cutStart + target;
+	if (cutStart < start) {
+		cutEnd += start - cutStart;
+		cutStart = start;
+	}
+	if (cutEnd > end) {
+		cutStart = Math.max(start, cutStart - (cutEnd - end));
+		cutEnd = end;
+	}
+	return { start: cutStart, end: cutEnd };
+}
+
+/** How far a growth step got, and how many lines it managed. */
+interface Growth {
+	at: number;
+	grown: number;
+}
+
+/** Adds up to `lines` whole lines below `end`, never past `limit`. */
+function growForward(text: string, end: number, limit: number, lines: number): Growth {
+	let at = end;
+	let grown = 0;
+	while (grown < lines && at < limit) {
+		const nextStart = nextLineStart(text, at);
+		if (nextStart >= limit || nextStart >= text.length) break;
+		const nextEnd = Math.min(limit, lineEndAt(text, nextStart));
+		if (nextEnd <= at) break;
+		at = nextEnd;
+		grown++;
+	}
+	return { at, grown };
+}
+
+/** Adds up to `lines` whole lines above `start`, never before `limit`. */
+function growBackward(text: string, start: number, limit: number, lines: number): Growth {
+	let at = start;
+	let grown = 0;
+	while (grown < lines && at > limit) {
+		const previousStart = lineStartAt(text, previousLineEnd(text, at));
+		if (previousStart < limit || previousStart >= at) break;
+		at = previousStart;
+		grown++;
+	}
+	return { at, grown };
+}
+
+/** Start of the line `count` lines above the one starting at `start`. */
+function lineStartBefore(text: string, start: number, count: number): number {
+	return growBackward(text, start, 0, count).at;
+}
+
+/** End of the line `count` lines below the one ending at `end`. */
+function lineEndAfter(text: string, end: number, count: number): number {
+	return growForward(text, end, text.length, count).at;
+}
+
+/** Number of lines the half-open range `[start, end)` covers. At least one. */
+function countLines(text: string, start: number, end: number): number {
+	let lines = 1;
+	for (let i = start; i < end; i++) {
+		const code = text.charCodeAt(i);
+		if (code !== CHAR_LF && code !== CHAR_CR) continue;
+		lines++;
+		if (code === CHAR_CR && i + 1 < end && text.charCodeAt(i + 1) === CHAR_LF) i++;
+	}
+	return lines;
+}
+
+/** Last offset a `[from, to)` range actually covers; `from` itself for an empty range. */
+function lastOffsetOf(from: number, to: number): number {
+	return to > from ? to - 1 : from;
 }
 
 /** Start of the line containing `at`. */

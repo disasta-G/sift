@@ -16,7 +16,7 @@ const TUNING: SiftTuning = Object.freeze({
 	maxTermVariants: 8,
 	maxQueryLength: 512,
 	snippetLength: 160,
-	fuzzyTrigramSimilarity: 0.6,
+	snippetLines: 5,
 	fuzzyMaxDistanceShort: 1,
 	fuzzyMaxDistanceLong: 2,
 	fuzzyShortTermMaxLength: 5,

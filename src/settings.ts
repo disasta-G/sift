@@ -67,21 +67,25 @@ export const DEFAULT_SETTINGS: SiftSettings = deepFreeze({
 	language: 'auto',
 	fuzzyByDefault: false,
 	includeSubfoldersByDefault: true,
-	highlightSelectedCard: true,
 	maxResults: 200,
 	forceRebuild: false,
 } satisfies SiftSettings);
 
 /** Frozen tuning constants: trigramSize 3, minTrigramTermLength 3, maxTermVariants 8, snippetLength 160,
- *  fuzzyTrigramSimilarity 0.6, distance 1 up to 5 chars / 2 from 6, searchDebounceMs 120, indexSliceMs 12,
- *  weights { title 3.0, frontmatter 2.0, tag 2.0, heading 1.5, body 1.0, path 1.0, wholeWord 1.3, fuzzy 0.7 }. */
+ *  snippetLines 5, distance 1 up to 5 chars / 2 from 6, searchDebounceMs 120, indexSliceMs 12,
+ *  weights { title 3.0, frontmatter 2.0, tag 2.0, heading 1.5, body 1.0, path 1.0, wholeWord 1.3, fuzzy 0.7 }.
+ *
+ *  There is deliberately no `fuzzyTrigramSimilarity` here any more: a constant
+ *  share of the term's trigrams rejected a short term's true matches before the
+ *  distance pass could see them. The floor is derived from the distance budget
+ *  instead — see the note on `SiftTuning.fuzzyMaxDistanceShort`. */
 export const DEFAULT_TUNING: SiftTuning = deepFreeze({
 	trigramSize: 3,
 	minTrigramTermLength: 3,
 	maxTermVariants: 8,
 	maxQueryLength: 512,
 	snippetLength: 160,
-	fuzzyTrigramSimilarity: 0.6,
+	snippetLines: 5,
 	fuzzyMaxDistanceShort: 1,
 	fuzzyMaxDistanceLong: 2,
 	fuzzyShortTermMaxLength: 5,
@@ -157,7 +161,6 @@ function freshDefaults(): SiftSettings {
 		language: DEFAULT_SETTINGS.language,
 		fuzzyByDefault: DEFAULT_SETTINGS.fuzzyByDefault,
 		includeSubfoldersByDefault: DEFAULT_SETTINGS.includeSubfoldersByDefault,
-		highlightSelectedCard: DEFAULT_SETTINGS.highlightSelectedCard,
 		maxResults: DEFAULT_SETTINGS.maxResults,
 		forceRebuild: DEFAULT_SETTINGS.forceRebuild,
 	};
@@ -193,7 +196,6 @@ function migrateRecord(source: Record<string, unknown>): SiftSettings {
 			source.includeSubfoldersByDefault,
 			DEFAULT_SETTINGS.includeSubfoldersByDefault,
 		),
-		highlightSelectedCard: migrateBoolean(source.highlightSelectedCard, DEFAULT_SETTINGS.highlightSelectedCard),
 		maxResults: migrateNumber(source.maxResults, DEFAULT_SETTINGS.maxResults, MAX_RESULTS_MIN, MAX_RESULTS_MAX),
 		forceRebuild: migrateBoolean(source.forceRebuild, DEFAULT_SETTINGS.forceRebuild),
 	};
@@ -319,7 +321,6 @@ export class SiftSettingTab extends PluginSettingTab {
 		this.renderLanguage(containerEl);
 		this.renderFuzzyByDefault(containerEl);
 		this.renderIncludeSubfolders(containerEl);
-		this.renderHighlightSelectedCard(containerEl);
 		this.renderMaxResults(containerEl);
 
 		new Setting(containerEl).setName(t('settings.heading.index')).setHeading();
@@ -450,17 +451,6 @@ export class SiftSettingTab extends PluginSettingTab {
 			);
 	}
 
-	private renderHighlightSelectedCard(containerEl: HTMLElement): void {
-		new Setting(containerEl)
-			.setName(t('settings.highlightSelectedCard.name'))
-			.setDesc(t('settings.highlightSelectedCard.desc'))
-			.addToggle((toggle) =>
-				toggle.setValue(this.settings.highlightSelectedCard).onChange((value) => {
-					this.settings.highlightSelectedCard = value;
-					void this.persist();
-				}),
-			);
-	}
 
 	private renderMaxResults(containerEl: HTMLElement): void {
 		new Setting(containerEl)

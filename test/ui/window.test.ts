@@ -43,8 +43,21 @@ const LIST_PADDING = 14;
 /** Scroller height. 700 / 142 -> six rows visible at a time. */
 const VIEWPORT = 700;
 
-/** What `computeWindow` derives from the numbers above: visible + 2 overscan + one block. */
-const WINDOW_SIZE = Math.ceil(VIEWPORT / ROW_HEIGHT) + 1 + 2 * 8 + 20;
+/** Mirrored from SearchModal: rows kept above and below the viewport, and the block the window snaps to. */
+const OVERSCAN = 8;
+const WINDOW_BLOCK = 20;
+
+/**
+ * What `computeWindow` derives from a row height: what fits, the overscan on
+ * both sides, and one block of slack. It is a function of the row height because
+ * the row height is a MEASUREMENT — a card carrying five-line excerpts is twice
+ * the height of the same card while its excerpts are still being read.
+ */
+function windowSizeFor(rowHeight: number): number {
+	return Math.ceil(VIEWPORT / rowHeight) + 1 + 2 * OVERSCAN + WINDOW_BLOCK;
+}
+
+const WINDOW_SIZE = windowSizeFor(ROW_HEIGHT);
 
 type Descriptors = Record<string, PropertyDescriptor | undefined>;
 
@@ -319,6 +332,25 @@ describe('pointer interaction', () => {
 		expect(h.opened).toEqual(['Projekte/Note 24.md']);
 	});
 
+	it('keeps the whole selected card inside the scrollport, border included', async () => {
+		const h = open(1000, { maxResults: 1000 });
+		await h.modal.runSearch(true);
+		await settle();
+
+		for (let step = 0; step < 12; step++) {
+			h.modal.moveSelection(1);
+			const selected = h.cards().find((card) => card.hasClass('sift-card--selected'));
+			if (selected === undefined) continue;
+			const top = selected.offsetTop - h.results().scrollTop;
+			const bottom = top + selected.offsetHeight;
+			// `overflow-y: auto` clips whatever lies outside; a card resting exactly
+			// on the client edge loses the outer row of its accent border, which is
+			// the frame the owner saw open at the top.
+			expect(top).toBeGreaterThanOrEqual(1);
+			expect(bottom).toBeLessThanOrEqual(VIEWPORT - 1);
+		}
+	});
+
 	it('still scrolls a keyboard selection into view', async () => {
 		const h = open(1000, { maxResults: 1000 });
 		await h.modal.runSearch(true);
@@ -330,5 +362,85 @@ describe('pointer interaction', () => {
 		// Card 8 ends at 14 + 8*142 + 124 = 1274, below the 700px fold.
 		expect(h.results().scrollTop).toBeGreaterThan(0);
 		expect(h.card(8).hasClass('sift-card--selected')).toBe(true);
+	});
+});
+
+/* -------------------------------------------------------------------------- */
+/* 3. Cards that grow when their excerpts arrive                              */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The modelled layout above gives every card the same height whatever it holds.
+ * A real one does not: a card is the height of its blank snippet area until the
+ * excerpts are read, and a five-line excerpt then roughly doubles it. That gap
+ * is what the spacers get wrong if the row height is measured once, on the first
+ * paint, and never again.
+ */
+describe('cards that grow when their excerpts arrive', () => {
+	/** A card whose excerpts have not been read yet. */
+	const BLANK_CARD = 100;
+	/** The same card once it carries a five-line excerpt. */
+	const FILLED_CARD = 300;
+
+	let restoreHeights: () => void = () => undefined;
+
+	beforeEach(() => {
+		const proto = HTMLElement.prototype;
+		const before = Object.getOwnPropertyDescriptor(proto, 'offsetHeight');
+		Object.defineProperty(proto, 'offsetHeight', {
+			configurable: true,
+			get(this: HTMLElement): number {
+				if (!this.classList.contains('sift-card')) return 0;
+				return this.querySelector('.sift-card__snippet') === null ? BLANK_CARD : FILLED_CARD;
+			},
+		});
+		restoreHeights = () => {
+			if (before !== undefined) Object.defineProperty(proto, 'offsetHeight', before);
+		};
+	});
+
+	afterEach(() => {
+		restoreHeights();
+	});
+
+	/** The bottom spacer, which stands in for every row below the rendered window. */
+	function bottomSpacer(h: Harness): HTMLElement {
+		const spacers = h.modal.contentEl.querySelectorAll<HTMLElement>('.sift-results__spacer');
+		const last = spacers[spacers.length - 1];
+		if (last === undefined) throw new Error('no bottom spacer');
+		return last;
+	}
+
+	it('rebuilds the spacers from the height the cards actually reached', async () => {
+		const h = open(5000, { maxResults: 5000 });
+		await h.modal.runSearch(true);
+		await settle();
+
+		// The window is still bounded by the viewport, not by the 5000 hits: what
+		// changes with a taller card is how many of them fit, never whether the
+		// list virtualizes at all.
+		const rendered = h.cards().length;
+		expect(rendered).toBe(windowSizeFor(BLANK_CARD + CARD_GAP));
+		expect(h.reads.length).toBe(rendered);
+
+		// Every rendered card carries an excerpt now, so the row height behind the
+		// spacers has to be the FILLED one. Measured only on the first paint, it
+		// would still be the blank height and the scrollbar would describe a list
+		// two thirds the length of the real one.
+		expect(bottomSpacer(h).style.height).toBe(`${(5000 - rendered) * (FILLED_CARD + CARD_GAP)}px`);
+	});
+
+	it('stays bounded after a scroll into a region that has never been read', async () => {
+		const h = open(5000, { maxResults: 5000 });
+		await h.modal.runSearch(true);
+		await settle();
+		const before = h.reads.length;
+
+		scrollTo(h, (FILLED_CARD + CARD_GAP) * 60);
+		await settle();
+
+		expect(h.cards().length).toBeLessThanOrEqual(windowSizeFor(BLANK_CARD + CARD_GAP));
+		expect(h.reads.length).toBeGreaterThan(before);
+		expect(new Set(h.reads).size).toBe(h.reads.length);
 	});
 });

@@ -188,7 +188,6 @@ describe('DEFAULT_SETTINGS', () => {
 			language: 'auto',
 			fuzzyByDefault: false,
 			includeSubfoldersByDefault: true,
-			highlightSelectedCard: true,
 			maxResults: 200,
 			forceRebuild: false,
 		});
@@ -216,13 +215,23 @@ describe('DEFAULT_TUNING', () => {
 		expect(DEFAULT_TUNING.maxTermVariants).toBe(8);
 		expect(DEFAULT_TUNING.maxQueryLength).toBe(512);
 		expect(DEFAULT_TUNING.snippetLength).toBe(160);
-		expect(DEFAULT_TUNING.fuzzyTrigramSimilarity).toBe(0.6);
+		expect(DEFAULT_TUNING.snippetLines).toBe(5);
 		expect(DEFAULT_TUNING.fuzzyMaxDistanceShort).toBe(1);
 		expect(DEFAULT_TUNING.fuzzyMaxDistanceLong).toBe(2);
 		expect(DEFAULT_TUNING.fuzzyShortTermMaxLength).toBe(5);
 		expect(DEFAULT_TUNING.searchDebounceMs).toBe(120);
 		expect(DEFAULT_TUNING.indexSliceMs).toBe(12);
 		expect(DEFAULT_TUNING.storeBatchSize).toBe(200);
+	});
+
+	/**
+	 * The candidate filter is derived from the distance budget now, not from a
+	 * constant share of the term's trigrams. A share rejected a short term's true
+	 * matches before the distance pass ever saw them, so restoring the knob would
+	 * restore the bug — see the note on `SiftTuning.fuzzyMaxDistanceShort`.
+	 */
+	it('carries no trigram-similarity floor any more', () => {
+		expect(Object.prototype.hasOwnProperty.call(DEFAULT_TUNING, 'fuzzyTrigramSimilarity')).toBe(false);
 	});
 
 	it('carries the documented ranking weights', () => {
@@ -313,7 +322,6 @@ describe('migrateSettings', () => {
 			language: 'de',
 			fuzzyByDefault: true,
 			includeSubfoldersByDefault: false,
-			highlightSelectedCard: false,
 			maxResults: 500,
 			forceRebuild: true,
 		};
@@ -404,7 +412,6 @@ describe('migrateSettings', () => {
 		expect(migrateSettings({ fuzzyByDefault: 'yes' }).fuzzyByDefault).toBe(false);
 		expect(migrateSettings({ includeSubfoldersByDefault: false }).includeSubfoldersByDefault).toBe(false);
 		expect(migrateSettings({ includeSubfoldersByDefault: 0 }).includeSubfoldersByDefault).toBe(true);
-		expect(migrateSettings({ highlightSelectedCard: false }).highlightSelectedCard).toBe(false);
 		expect(migrateSettings({ forceRebuild: true }).forceRebuild).toBe(true);
 		expect(migrateSettings({ forceRebuild: 1 }).forceRebuild).toBe(false);
 	});
@@ -504,7 +511,8 @@ describe('SiftSettingTab.display', () => {
 		harness.tab.display();
 
 		const names = Array.from(harness.container.querySelectorAll('.setting-item-name'));
-		expect(names.length).toBe(12);
+		// Eight general rows, the index heading and its two rows.
+		expect(names.length).toBe(11);
 		for (const name of names) {
 			const text = (name.textContent ?? '').trim();
 			expect(text.length, name.className).toBeGreaterThan(0);
@@ -537,7 +545,8 @@ describe('SiftSettingTab.display', () => {
 		harness.tab.display();
 		const items = Array.from(harness.container.querySelectorAll('.setting-item'));
 		const firstHeading = items.findIndex((item) => item.classList.contains('setting-item-heading'));
-		expect(firstHeading).toBe(9);
+		// The eight general rows come first; the index heading opens the second block.
+		expect(firstHeading).toBe(8);
 	});
 
 	it('shows the current values in the controls', () => {
@@ -760,19 +769,17 @@ describe('changing a display-only setting', () => {
 		expect(harness.saves.length).toBe(3);
 	});
 
-	it('saves the three toggles', () => {
+	it('saves both toggles', () => {
 		const harness = createHarness();
 		harness.tab.display();
-		const [fuzzy, subfolders, highlight] = toggles(harness);
+		const [fuzzy, subfolders] = toggles(harness);
 
 		fuzzy.dispatchEvent(new Event('click'));
 		subfolders.dispatchEvent(new Event('click'));
-		highlight.dispatchEvent(new Event('click'));
 
 		expect(harness.plugin.settings.fuzzyByDefault).toBe(true);
 		expect(harness.plugin.settings.includeSubfoldersByDefault).toBe(false);
-		expect(harness.plugin.settings.highlightSelectedCard).toBe(false);
-		expect(harness.saves.length).toBe(3);
+		expect(harness.saves.length).toBe(2);
 	});
 
 	it('re-renders in the chosen language', () => {

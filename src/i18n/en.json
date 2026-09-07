@@ -31,6 +31,9 @@
 	"filter.quick30Days": "Last 30 days",
 	"filter.quickYear": "Last year",
 	"filter.quickAnyTime": "Any time",
+	"filter.previousMonth": "Previous month",
+	"filter.nextMonth": "Next month",
+	"filter.clearRange": "Clear the range",
 	"filter.show": "Show filters",
 	"filter.hide": "Hide filters",
 
@@ -112,8 +115,6 @@
 	"settings.fuzzyByDefault.desc": "Starts every search with the similar toggle switched on.",
 	"settings.includeSubfolders.name": "Include subfolders by default",
 	"settings.includeSubfolders.desc": "Starts every search with the subfolders of the chosen folder included.",
-	"settings.highlightSelectedCard.name": "Highlight the selected result",
-	"settings.highlightSelectedCard.desc": "Scales the selected card slightly. Turn it off when the text looks soft on your screen.",
 	"settings.maxResults.name": "Maximum results",
 	"settings.maxResults.desc": "Upper limit of results shown per search, between 20 and 1000.",
 

@@ -326,15 +326,18 @@ rather than the light mockup's visible edge, so both themes agree.
 	margin-left: -6px;
 }
 
+/* The popover holds the quick picks and the calendar side by side. It is
+   absolutely positioned, so the filter bar keeps the height it had. */
 .sift-date-menu {
 	display: none;
 	position: absolute;
 	top: calc(100% + 6px);
 	left: 0;
 	z-index: 2;
-	flex-direction: column;
-	min-width: 160px;
-	padding: 4px;
+	flex-direction: row;
+	align-items: flex-start;
+	gap: 10px;
+	padding: 8px;
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 6px;
 	background-color: var(--background-secondary);
@@ -343,6 +346,13 @@ rather than the light mockup's visible edge, so both themes agree.
 
 .sift-filters__date--open .sift-date-menu {
 	display: flex;
+}
+
+.sift-date-menu__picks {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	min-width: 132px;
 }
 
 .sift-date-menu__item {
@@ -354,12 +364,160 @@ rather than the light mockup's visible edge, so both themes agree.
 	font-family: inherit;
 	font-size: 13px;
 	text-align: left;
+	white-space: nowrap;
 	color: var(--text-normal);
 	cursor: pointer;
 }
 
 .sift-date-menu__item:hover {
 	background-color: var(--background-modifier-hover);
+}
+
+/* --- calendar ------------------------------------------------------------- */
+
+.sift-cal {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding-left: 10px;
+	border-left: 1px solid var(--background-modifier-border);
+}
+
+.sift-cal__head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 6px;
+}
+
+.sift-cal__month {
+	flex-grow: 1;
+	text-align: center;
+	font-size: 13px;
+	font-weight: 600;
+	white-space: nowrap;
+	color: var(--text-normal);
+}
+
+.sift-cal__nav {
+	--icon-size: 14px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	width: 24px;
+	height: 24px;
+	padding: 0;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-cal__nav:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.sift-cal__grid {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.sift-cal__week {
+	display: grid;
+	grid-template-columns: repeat(7, 28px);
+	gap: 2px;
+}
+
+.sift-cal__weekday {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 20px;
+	font-size: 11px;
+	color: var(--text-faint);
+}
+
+.sift-cal__blank {
+	height: 26px;
+}
+
+.sift-cal__day {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	height: 26px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: 4px;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 12px;
+	line-height: 1;
+	color: var(--text-normal);
+	cursor: pointer;
+}
+
+.sift-cal__day:hover {
+	background-color: var(--background-modifier-hover);
+}
+
+/* Today is an outline, so it survives being inside the selected range. */
+.sift-cal__day--today {
+	border-color: var(--background-modifier-border);
+}
+
+/* The days between the two ends: the accent, held well back so the ends stay
+   the two things the eye lands on. */
+.sift-cal__day--inside {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.sift-cal__day--start,
+.sift-cal__day--end {
+	background-color: var(--interactive-accent);
+	border-color: var(--interactive-accent);
+	color: var(--text-on-accent);
+}
+
+.sift-cal__day--start:hover,
+.sift-cal__day--end:hover {
+	background-color: var(--interactive-accent-hover, var(--interactive-accent));
+}
+
+/* The not-yet-committed half of a range under the pointer, one step below the
+   committed one so a preview never reads as a decision. */
+.sift-cal__day--preview {
+	background-color: var(--background-modifier-active-hover, var(--background-modifier-hover));
+	border-color: transparent;
+	color: var(--text-normal);
+}
+
+.sift-cal__day:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
+}
+
+.sift-cal__clear {
+	padding: 4px 6px;
+	border: none;
+	border-radius: 4px;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 12px;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-cal__clear:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
 }
 
 /* --- sort ----------------------------------------------------------------- */
@@ -459,24 +617,31 @@ rather than the light mockup's visible edge, so both themes agree.
 	border-radius: var(--radius-m, 8px);
 	background-color: var(--background-secondary);
 	cursor: pointer;
-	transform-origin: center;
-	transition: transform 120ms ease-out;
 }
 
 .sift-card:hover {
 	border-color: var(--background-modifier-border);
 }
 
+/* The selected card is an accent border, a shadow and one step of extra fill —
+   and no transform. It used to scale to 1.02, which resamples the glyphs of the
+   one card the user is reading; docs/plan.md predicted the soft text and offered
+   a setting for it, but a default that blurs text is not a default worth
+   keeping, so the scale is gone rather than optional. */
 .sift-card--selected {
 	position: relative;
 	z-index: 1;
 	border-color: var(--interactive-accent);
 	box-shadow: var(--shadow-l2);
-}
-
-.sift-card--zoomed {
-	transform: scale(1.02);
-	will-change: transform;
+	/* --background-modifier-hover is a TRANSLUCENT overlay: white in a dark
+	   theme, black in a light one. Laid over the card's own fill it lifts the
+	   card where the surface is dark and tints it where the surface is already
+	   white, which is the only way one declaration reads correctly in both. It is
+	   a gradient layer rather than a background-color because a background-color
+	   would composite against the modal behind the card instead of against
+	   --background-secondary, and in a theme whose primary is lighter than its
+	   secondary that inverts the effect. */
+	background-image: linear-gradient(var(--background-modifier-hover), var(--background-modifier-hover));
 }
 
 .sift-card__head {
@@ -681,19 +846,44 @@ rather than the light mockup's visible edge, so both themes agree.
 	.sift-footer {
 		padding: 8px 16px;
 	}
+
+	/* Side by side the popover is about 380px wide, which does not fit a phone.
+	   The calendar moves under the quick picks, and the popover is anchored to
+	   the whole filter bar instead of to the chip: at this width the chips wrap,
+	   so a popover hanging off the chip's own left edge can end up half off the
+	   screen — where the modal's `overflow: hidden` would cut it. */
+	.sift-filters {
+		position: relative;
+	}
+
+	.sift-filters__date {
+		position: static;
+	}
+
+	.sift-date-menu {
+		flex-direction: column;
+		top: 100%;
+		left: 16px;
+		right: 16px;
+	}
+
+	.sift-cal {
+		padding-left: 0;
+		padding-top: 8px;
+		border-left: none;
+		border-top: 1px solid var(--background-modifier-border);
+	}
 }
 
 /* ========================================================================== */
 /* 9. Reduced motion                                                          */
 /* ========================================================================== */
 
-/* The transition goes, the scale stays: the selection must remain visible
-   without motion. */
+/* The card itself is not listed any more: with the selection scale gone it has
+   no transition left to switch off, and a rule that disables nothing is a rule
+   nobody can check. The selection stays fully visible here — border, fill and
+   shadow are all static. */
 @media (prefers-reduced-motion: reduce) {
-	.sift-card {
-		transition: none;
-	}
-
 	.sift-toggle__thumb {
 		transition: none;
 	}
