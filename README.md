@@ -92,25 +92,19 @@ Each chip can be removed individually; nothing is remembered between two searche
 
 The index is built once per vault and then kept up to date incrementally: creating, editing, renaming or deleting a note re-reads that one note, not the vault. Indexing runs in small slices during idle time, so the interface never freezes, and the search overlay stays usable while it is still running.
 
-Measured with `npm run bench` against the generated 10 000-note test vault, on one desktop workstation — an Intel Core i9-13900K with 64 GB of memory, Node 22 on Windows 11. Your own machine will differ; a laptop on battery differs a lot.
+Measured with `npm run bench` against the generated 10 000-note test vault, median of three runs, on one desktop workstation — an Intel Core i9-13900K, 64 GB of memory, Node 22 on Windows 11. Your own machine will differ; a laptop on battery differs a lot.
 
 | What | Measured | Target |
 | --- | --- | --- |
-| Cold index of 10 000 notes | 1.88 s | under 5 s |
-| Warm start from the stored index | 1.14 s | — |
-| Index memory for 10 000 notes | 50.7 MB | under 100 MB |
-| Re-index one changed note | 112 ms | — |
-| Single search on 10 000 notes | 0.9 ms to 140 ms, see below | under 100 ms |
+| Cold index of 10 000 notes | 1.97 s | under 5 s |
+| Warm start from the stored index | 1.22 s | — |
+| Index memory for 10 000 notes | 50.9 MB | under 100 MB |
+| Re-index one changed note | 114 ms | — |
+| Slowest of 34 search shapes | 43.4 ms | under 100 ms |
 
-**The search figure is not settled yet.** Across the 28 query shapes the benchmark runs — single terms, infix terms, two- and three-term queries, phrases, exclusions, OR groups, the `path:`, `title:` and `tag:` prefixes, umlaut and ASCII-alias spellings, folder and date filters — the p95 ranges from 0.87 ms to 140.4 ms. Twenty-five of the 28 stay under 62 ms. Three do not, and all three are queries that match a large part of the vault, so almost every note has to be verified and ranked individually:
+The search figure is the p95 of the slowest of 34 query shapes the benchmark runs — single terms, infix terms, two- and three-term queries, phrases, exclusions, OR groups, the `path:`, `title:` and `tag:` prefixes, umlaut and ASCII-alias spellings, two-character terms, folder and date filters, filter-only searches and two sort orders. All 34 stay under 62 ms. The slowest is `wärmepumpe OR erdsondenfeld OR lüftungsanlage`, which matches 6 101 of the 10 000 notes and therefore has to rank most of the vault.
 
-| Query | Notes matched | p95 |
-| --- | --- | --- |
-| `path:Projekte` | 4 300 | 65.4 ms |
-| `wärmepumpe OR erdsondenfeld OR lüftungsanlage` | 6 101 | 110.9 ms |
-| `ss` | 10 000 | 140.4 ms |
-
-The last two are over the 100 ms target, the two-character term by 40 %: a term that short has no trigram to narrow the candidate set with, so it falls back to scanning every note. That path is being reworked, which is why the summary table gives a range rather than a single number that is about to change.
+**Typo tolerance costs more, and is off by default.** With "Similar" on, the same 34 shapes range from 1.8 ms to 214 ms, and nine of them pass 100 ms. That mode compares the query against the words of every candidate note, so the work grows with how much of the vault a term can plausibly reach; the budget for it is 500 ms rather than 100 ms, and it is a switch you throw when an exact search came back empty.
 
 The 10 000-note run is the release gate and has to be repeated before a release. Continuous integration runs the same benchmark at 2 000 notes, where a hosted runner can afford it, against budgets loose enough that only an order-of-magnitude regression fails — a shared two-core runner cannot be held to a workstation's numbers, but it can catch a linear scan that turned quadratic.
 
@@ -174,4 +168,3 @@ Everything above describes the plugin as it stands. This last section is a maint
   - `docs/screenshot-filters.png` — the filter bar expanded: folder picker, "Include subfolders", the created-date range and the sort dropdown.
   - `docs/screenshot-settings.png` — the settings tab, including the index statistics line and the "Rebuild index" button.
   - `docs/screenshot-indexing.png` — the empty state shown while the index is still being built.
-- **Settle the search number.** Rework the short-term path so a two-character term stops verifying every note, then re-run `npm run bench` at 10 000 notes and replace the range in [Performance](#performance) with a single measured figure.
