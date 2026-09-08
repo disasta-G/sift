@@ -7,7 +7,15 @@ page every user of the plugin reads.
 
 - **The public repository** `disasta-G/sift` exists, with `master` and the
   `1.0.0` tag pushed. The CI workflow triggers on `main` and on `master`, so
-  either name works.
+  either name works, and it is green.
+
+- **The release is cut.** Tag `1.0.0`, no `v` prefix, matching `manifest.json`.
+  `main.js`, `manifest.json` and `styles.css` hang on it as three individual
+  assets, not a zip, and all three are byte-identical to what the current
+  sources build.
+
+- **README, LICENSE and manifest.json** sit in the repository root, which is
+  where the directory looks for them.
 
 ## What still has to happen
 
@@ -22,13 +30,8 @@ page every user of the plugin reads.
   - `docs/screenshot-indexing.png` — the empty state shown while the index is
     still being built.
 
-- **Cut the release.** Tag `1.0.0`, no `v` prefix — the directory matches the
-  tag against `manifest.json` exactly. Attach `main.js`, `manifest.json` and
-  `styles.css` as three individual assets, never a zip.
-
-- **Open the submission pull request** against `obsidianmd/obsidian-releases`.
-  It must change `community-plugins.json` and nothing else, and it must come
-  from the account that owns the plugin repository.
+- **Submit through the directory.** See "How the submission works" below. It
+  is a web form on community.obsidian.md, not a pull request.
 
 ## The release gate
 
@@ -42,30 +45,31 @@ npm run bench     # 10 000 notes; all six budgets must pass
 `npm run check` builds first on purpose: the release guard reads `main.js`, so
 the bundle has to be the one the current sources produce.
 
-## The directory entry
+## How the submission works
 
-Append this as the **last** element of `community-plugins.json`. The five
-fields are the only ones allowed, and `id`, `name` and `description` have to
-match `manifest.json` character for character.
+**Not a pull request.** Submitting used to mean opening one against
+`obsidianmd/obsidian-releases` and appending an entry to
+`community-plugins.json`. That path is gone: pull requests and issues are
+switched off on that repository, and an attempt now answers with "An owner of
+this repository has disabled the ability to open pull requests." Editing
+`community-plugins.json` by hand is no longer part of the process at all — the
+directory writes that file itself.
 
-Field order and indentation follow the file, not this project's own style: all
-7 406 entries in it are ordered `id, name, author, description, repo` and are
-indented with two spaces. A tab-indented entry in a different order still
-parses, but it shows up as a reformatting of someone else's file.
+The current route, per
+<https://docs.obsidian.md/Plugins/Releasing/Submit+your+plugin>:
 
-```json
-  {
-    "id": "sift",
-    "name": "Sift",
-    "author": "Dario Giovanoli",
-    "description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
-    "repo": "disasta-G/sift"
-  }
-```
+1. Sign in at <https://community.obsidian.md> with an Obsidian account.
+2. Link the GitHub account to that profile. This is how the directory verifies
+   that the submitter owns the repository.
+3. Add the plugin through the directory interface.
+4. Answer the automated review there. Its feedback appears in the directory
+   itself, and a correction means a new release with a raised version, not a
+   comment on a thread.
 
-Do not append " - This plugin has not been manually reviewed by Obsidian
-staff." to the description. Many entries carry that sentence; it is added by
-the directory, not by the person submitting.
+What it reads: the `manifest.json` at the **HEAD of the default branch**, so
+that file has to be correct and pushed before submitting — not merely correct
+inside the release. The `id` has to be unique across the directory and must not
+contain "obsidian". `sift` satisfies both.
 
 ## After submission
 
