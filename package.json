@@ -1,6 +1,6 @@
 {
   "name": "sift",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
   "main": "main.js",
   "private": true,
