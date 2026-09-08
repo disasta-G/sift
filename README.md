@@ -16,6 +16,10 @@ The same overlay in a light theme. Sift hardcodes no colour; every surface, bord
 
 ![The same search overlay in a light theme](docs/screenshot-overlay-light.png)
 
+The settings tab. It reports how many notes are indexed and how much memory the index occupies, and rebuilds the index on demand.
+
+![Sift's settings tab, showing the index statistics and the rebuild button](docs/screenshot-settings.png)
+
 ## What it does
 
 - **Substring (infix) matching.** The index is built from trigrams, so a term matches anywhere inside a word. `maschine` finds `Espressomaschine`; `sonde` finds `Erdsondenfeld`. Prefix-only search engines cannot do this.

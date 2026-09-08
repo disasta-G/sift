@@ -11,16 +11,14 @@ page every user of the plugin reads.
 
 ## What still has to happen
 
-- **Record the remaining screenshots.** Two are in the repository and linked
+- **Record the remaining screenshots.** Three are in the repository and linked
   from the Screenshots section of `README.md`, directly under the introduction:
-  `docs/screenshot-overlay-dark.png` and `docs/screenshot-overlay-light.png`.
-  Three more were planned. They are optional — the directory asks for at least
-  one — so either record them and add them to the same section, or drop them
-  from this list:
+  the overlay in a dark and in a light theme, and the settings tab. Two more
+  were planned. They are optional — the directory asks for at least one — so
+  either record them and add them to the same section, or drop them from this
+  list:
   - `docs/screenshot-filters.png` — the filter bar with the created-date
     popover open: quick picks, calendar, folder picker and sort.
-  - `docs/screenshot-settings.png` — the settings tab, including the index
-    statistics line and the "Rebuild index" button.
   - `docs/screenshot-indexing.png` — the empty state shown while the index is
     still being built.
 
