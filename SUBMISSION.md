@@ -48,15 +48,24 @@ Append this as the **last** element of `community-plugins.json`. The five
 fields are the only ones allowed, and `id`, `name` and `description` have to
 match `manifest.json` character for character.
 
+Field order and indentation follow the file, not this project's own style: all
+7 406 entries in it are ordered `id, name, author, description, repo` and are
+indented with two spaces. A tab-indented entry in a different order still
+parses, but it shows up as a reformatting of someone else's file.
+
 ```json
-{
-	"id": "sift",
-	"name": "Sift",
-	"description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
-	"author": "Dario Giovanoli",
-	"repo": "disasta-G/sift"
-}
+  {
+    "id": "sift",
+    "name": "Sift",
+    "author": "Dario Giovanoli",
+    "description": "Search your notes with substring matching, operators, path and date filters, and ranked results in a large overlay.",
+    "repo": "disasta-G/sift"
+  }
 ```
+
+Do not append " - This plugin has not been manually reviewed by Obsidian
+staff." to the description. Many entries carry that sentence; it is added by
+the directory, not by the person submitting.
 
 ## After submission
 
