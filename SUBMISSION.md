@@ -3,25 +3,26 @@
 A maintainer checklist. It is deliberately not part of `README.md`, which is the
 page every user of the plugin reads.
 
+## Done
+
+- **The public repository** `disasta-G/sift` exists, with `master` and the
+  `1.0.0` tag pushed. The CI workflow triggers on `main` and on `master`, so
+  either name works.
+
 ## What still has to happen
 
-- **Record the screenshots.** None exist in the repository yet. Five images go
-  under `docs/`, and a Screenshots section linking them belongs directly under
-  the introduction in `README.md`:
-  - `docs/screenshot-overlay-dark.png` — the search overlay in a dark theme,
-    query typed, several result cards with highlighted excerpts visible.
-  - `docs/screenshot-overlay-light.png` — the same overlay in a light theme, to
-    show that no colour is hardcoded.
+- **Record the remaining screenshots.** Two are in the repository and linked
+  from the Screenshots section of `README.md`, directly under the introduction:
+  `docs/screenshot-overlay-dark.png` and `docs/screenshot-overlay-light.png`.
+  Three more were planned. They are optional — the directory asks for at least
+  one — so either record them and add them to the same section, or drop them
+  from this list:
   - `docs/screenshot-filters.png` — the filter bar with the created-date
     popover open: quick picks, calendar, folder picker and sort.
   - `docs/screenshot-settings.png` — the settings tab, including the index
     statistics line and the "Rebuild index" button.
   - `docs/screenshot-indexing.png` — the empty state shown while the index is
     still being built.
-
-- **Create the public repository** `disasta-G/sift` and push the branch together
-  with the `1.0.0` tag. The CI workflow triggers on `main` and on `master`, so
-  either name works.
 
 - **Cut the release.** Tag `1.0.0`, no `v` prefix — the directory matches the
   tag against `manifest.json` exactly. Attach `main.js`, `manifest.json` and

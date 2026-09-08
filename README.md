@@ -6,6 +6,16 @@ Sift is a community plugin for Obsidian. It keeps a local index of your Markdown
 
 Everything runs on your device. Sift makes no network requests at all — see [Privacy and network use](#privacy-and-network-use).
 
+## Screenshots
+
+The search overlay in a dark theme: the query matches inside words, and every card carries excerpts cut from the note itself, with the hits highlighted.
+
+![Sift's search overlay in a dark theme, showing ranked results with highlighted excerpts](docs/screenshot-overlay-dark.png)
+
+The same overlay in a light theme. Sift hardcodes no colour; every surface, border and highlight comes from the Obsidian theme variables, so it follows whatever theme you use.
+
+![The same search overlay in a light theme](docs/screenshot-overlay-light.png)
+
 ## What it does
 
 - **Substring (infix) matching.** The index is built from trigrams, so a term matches anywhere inside a word. `maschine` finds `Espressomaschine`; `sonde` finds `Erdsondenfeld`. Prefix-only search engines cannot do this.
