@@ -603,7 +603,6 @@
 			"pattern": "bezahlt|kostenpflichtig|monetarisierung|\\babo\\b|abonnement|\\bpaid\\b",
 			"flags": "i",
 			"targets": [
-				"CLAUDE.md",
 				"HANDOFF.md",
 				"README.md"
 			]

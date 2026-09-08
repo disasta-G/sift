@@ -26,6 +26,3 @@ data.json
 
 # Preview harness bundle (dev/preview)
 dev/preview/preview.js
-
-# Local notes, never published
-CLAUDE.local.md

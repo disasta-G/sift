@@ -1,8 +1,8 @@
 /**
  * Sift performance gate — `npm run bench` (runs through tsx).
  *
- * Measures exactly the three numbers CLAUDE.md sets as targets, against the real
- * engine rather than a stand-in:
+ * Measures exactly the three numbers docs/performance-targets.md sets, against
+ * the real engine rather than a stand-in:
  *
  *   - a cold index of 10 000 notes in under 5 s,
  *   - a search in under 100 ms,
@@ -64,20 +64,20 @@ import type { LoadedVault } from '../test/fixtures/loadVault';
 /* 1. Targets                                                                 */
 /* ========================================================================== */
 
-/** The note count CLAUDE.md states its budgets for. */
+/** The note count the targets are stated for. */
 const REFERENCE_COUNT = 10_000;
 
-/** Cold index of {@link REFERENCE_COUNT} notes, in ms. CLAUDE.md. */
+/** Cold index of {@link REFERENCE_COUNT} notes, in ms. See docs/performance-targets.md. */
 const COLD_INDEX_BUDGET_MS = 5_000;
 
-/** Index footprint at {@link REFERENCE_COUNT} notes, in bytes. CLAUDE.md. */
+/** Index footprint at {@link REFERENCE_COUNT} notes, in bytes. See docs/performance-targets.md. */
 const INDEX_BYTES_BUDGET = 100 * 1024 * 1024;
 
-/** One search, in ms. CLAUDE.md. Not scaled: a smaller vault only makes it easier. */
+/** One search, in ms. Not scaled: a smaller vault only makes it easier. */
 const SEARCH_BUDGET_MS = 100;
 
 /**
- * Fuzzy search, in ms. NOT a CLAUDE.md target — the "Similar" toggle is opt-in
+ * Fuzzy search, in ms. NOT a stated target — the "Similar" toggle is opt-in
  * and walks every candidate's packed word list, so it is allowed to cost more
  * than an exact search. The number is the point at which the feature stops
  * feeling instant: the UI debounces at 120 ms, so anything past half a second
@@ -702,7 +702,7 @@ interface Check {
 	name: string;
 	measured: string;
 	budget: string;
-	source: 'CLAUDE.md' | 'benchmark';
+	source: 'target' | 'benchmark';
 	passed: boolean;
 }
 
@@ -797,7 +797,7 @@ async function main(): Promise<number> {
 	);
 	if (noteCount !== REFERENCE_COUNT) {
 		console.log(
-			`  NOTE: CLAUDE.md states its index budgets for ${formatCount(REFERENCE_COUNT)} notes. They are scaled linearly to ${formatCount(noteCount)} here,`,
+			`  NOTE: the index budgets are stated for ${formatCount(REFERENCE_COUNT)} notes. They are scaled linearly to ${formatCount(noteCount)} here,`,
 		);
 		console.log('        so this run is an indication, not the release gate. Run with --count 10000 for that.');
 	}
@@ -873,21 +873,21 @@ async function main(): Promise<number> {
 			name: `Cold index of ${formatCount(noteCount)} note${noteCount === 1 ? '' : 's'}`,
 			measured: formatMs(coldIndexMs),
 			budget: `< ${formatMs(coldBudget)}`,
-			source: 'CLAUDE.md',
+			source: 'target',
 			passed: coldIndexMs < coldBudget,
 		},
 		{
 			name: `Search p95, worst case (${exactWorst === null ? 'none' : exactWorst.label})`,
 			measured: exactWorst === null ? 'n/a' : formatMs(exactWorst.p95),
 			budget: `< ${formatMs(SEARCH_BUDGET_MS)}`,
-			source: 'CLAUDE.md',
+			source: 'target',
 			passed: exactWorst !== null && exactWorst.p95 < SEARCH_BUDGET_MS,
 		},
 		{
 			name: 'Index memory',
 			measured: formatBytes(approximateBytes),
 			budget: `< ${formatBytes(memoryBudget)}`,
-			source: 'CLAUDE.md',
+			source: 'target',
 			passed: approximateBytes < memoryBudget,
 		},
 		{

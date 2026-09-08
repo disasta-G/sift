@@ -82,7 +82,7 @@ jobs:
            * just wrote.
            *
            * They are NOT the project's performance targets. Those are stated for
-           * 10 000 notes in CLAUDE.md, the benchmark scales them linearly to the
+           * 10 000 notes in docs/performance-targets.md, the benchmark scales them to the
            * note count it ran at, and the README quotes what they measure on a
            * known workstation. Gating on those here would go red for reasons
            * that have nothing to do with the code, because a shared two-core
