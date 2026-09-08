@@ -64,6 +64,11 @@ export default tseslint.config(
 			"obsidianmd/no-tfile-tfolder-cast": "off",
 			// Fixture text is test data, not user interface copy.
 			"obsidianmd/ui/sentence-case": "off",
+			// The settings tab keeps display() as the path for Obsidian versions
+			// before 1.13.0, which is exactly what these tests exercise. A test
+			// for a deprecated fallback has to call it; warning about that in
+			// every assertion buries the warnings that mean something.
+			"@typescript-eslint/no-deprecated": "off",
 		},
 	},
 );

@@ -39,7 +39,10 @@ function isMarkdown(file: TFile): boolean {
 }
 
 export default class SiftPlugin extends Plugin {
-	settings!: SiftSettings;
+	// `declare`, not a field: Plugin itself declares `settings?: unknown` as
+	// of 1.13.0, and this only narrows that type. Emitting a field here would
+	// initialise it to undefined and shadow what the base class holds.
+	declare settings: SiftSettings;
 	tuning!: SiftTuning;
 	store!: Store;
 	indexer!: Indexer;

@@ -903,3 +903,141 @@ describe('store policy', () => {
 		}
 	});
 });
+
+/* -------------------------------------------------------------------------- */
+/* Declarative settings definitions (Obsidian 1.13.0 and newer)               */
+/* -------------------------------------------------------------------------- */
+
+/** Every definition in the tree, groups flattened away. */
+function flatten(items: readonly unknown[]): Record<string, unknown>[] {
+	const out: Record<string, unknown>[] = [];
+	for (const raw of items) {
+		const item = raw as Record<string, unknown>;
+		if (Array.isArray(item.items)) {
+			out.push(...flatten(item.items as readonly unknown[]));
+			continue;
+		}
+		out.push(item);
+	}
+	return out;
+}
+
+/** The `key` of every value-holding control, in declaration order. */
+function controlKeys(items: readonly unknown[]): string[] {
+	return flatten(items)
+		.map((item) => (item.control as Record<string, unknown> | undefined)?.key)
+		.filter((key): key is string => typeof key === 'string');
+}
+
+describe('getSettingDefinitions', () => {
+	it('declares a control for every setting the imperative tab offers', () => {
+		const harness = createHarness();
+		const keys = controlKeys(harness.tab.getSettingDefinitions());
+
+		// The eight settings on the tab. `version` and `forceRebuild` are not on
+		// it: one is the schema marker, the other is internal rebuild state.
+		expect([...keys].sort()).toEqual(
+			[
+				'createdField',
+				'defaultSort',
+				'excludedFolders',
+				'fuzzyByDefault',
+				'includeSubfoldersByDefault',
+				'language',
+				'maxResults',
+				'snippetCount',
+			].sort(),
+		);
+	});
+
+	it('names every control after a real settings field', () => {
+		const harness = createHarness();
+		for (const key of controlKeys(harness.tab.getSettingDefinitions())) {
+			expect(Object.keys(DEFAULT_SETTINGS), key).toContain(key);
+		}
+	});
+
+	/**
+	 * The declarative tab and display() describe the same tab, and Obsidian shows
+	 * whichever one the running version supports. Nobody sees both, so nothing
+	 * but this test notices when a setting is added to one and forgotten in the
+	 * other.
+	 */
+	it('shows the same rows as the imperative tab, in the same order', () => {
+		const harness = createHarness();
+		const declared = flatten(harness.tab.getSettingDefinitions()).map((item) => item.name);
+
+		harness.tab.display();
+		const painted = Array.from(harness.container.querySelectorAll('.setting-item-name'))
+			.map((el) => (el.textContent ?? '').trim())
+			// The group heading is a row of its own imperatively and a property of
+			// the group declaratively, so it has no counterpart in the flattened list.
+			.filter((name) => name !== t('settings.heading.index'));
+
+		expect(declared).toEqual(painted);
+	});
+
+	it('translates every name and description', () => {
+		const harness = createHarness();
+		for (const item of flatten(harness.tab.getSettingDefinitions())) {
+			expect(String(item.name).trim().length).toBeGreaterThan(0);
+			expect(String(item.name)).not.toMatch(KEY_LIKE);
+			if (typeof item.desc === 'string' && item.desc.length > 0) {
+				expect(item.desc).not.toMatch(KEY_LIKE);
+			}
+		}
+	});
+});
+
+describe('getControlValue / setControlValue', () => {
+	it('reads each setting, and the folder list as the lines of a textarea', () => {
+		const harness = createHarness();
+		harness.plugin.settings.excludedFolders = ['Archive', 'Templates'];
+		harness.plugin.settings.maxResults = 120;
+
+		expect(harness.tab.getControlValue('maxResults')).toBe(120);
+		expect(harness.tab.getControlValue('excludedFolders')).toBe('Archive\nTemplates');
+		expect(harness.tab.getControlValue('fuzzyByDefault')).toBe(DEFAULT_SETTINGS.fuzzyByDefault);
+	});
+
+	it('clamps a number to its range, and falls back to the default for a non-number', () => {
+		const harness = createHarness();
+
+		// Clamped to the edge rather than reset: a slider dragged to the end means
+		// "as far as it goes", not "start over".
+		harness.tab.setControlValue('maxResults', 999_999);
+		expect(harness.plugin.settings.maxResults).toBe(1000);
+
+		harness.tab.setControlValue('snippetCount', 0);
+		expect(harness.plugin.settings.snippetCount).toBe(1);
+
+		// A negative number is not a slider position that overshot, it is a value
+		// that cannot be meant, so it resets instead of clamping. Same for a value
+		// that is not a number at all.
+		harness.tab.setControlValue('snippetCount', -1);
+		expect(harness.plugin.settings.snippetCount).toBe(DEFAULT_SETTINGS.snippetCount);
+
+		harness.tab.setControlValue('maxResults', 'plenty');
+		expect(harness.plugin.settings.maxResults).toBe(DEFAULT_SETTINGS.maxResults);
+	});
+
+	it('sanitizes a folder list the same way the textarea does', () => {
+		const harness = createHarness();
+		harness.tab.setControlValue('excludedFolders', '  Archive  \n\n/Templates/\n');
+		expect(harness.plugin.settings.excludedFolders).toEqual(['Archive', 'Templates']);
+	});
+
+	it('falls back to the default for a value outside the option list', () => {
+		const harness = createHarness();
+		harness.tab.setControlValue('defaultSort', 'not-a-sort-order');
+		expect(harness.plugin.settings.defaultSort).toBe(DEFAULT_SETTINGS.defaultSort);
+
+		harness.tab.setControlValue('language', 'kl');
+		expect(harness.plugin.settings.language).toBe(DEFAULT_SETTINGS.language);
+	});
+
+	it('ignores a key it does not know instead of throwing', () => {
+		const harness = createHarness();
+		expect(() => harness.tab.setControlValue('nonsense', 1)).not.toThrow();
+	});
+});

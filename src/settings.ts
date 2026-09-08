@@ -29,7 +29,7 @@
  */
 
 import { Notice, PluginSettingTab, Setting, debounce, getLanguage, normalizePath } from 'obsidian';
-import type { App, ButtonComponent, Debouncer } from 'obsidian';
+import type { App, ButtonComponent, Debouncer, SettingDefinitionItem } from 'obsidian';
 import { dateFormatLocale, setLanguage, t } from './i18n/index';
 import type { TranslationKey } from './i18n/index';
 import type { IndexStats, LanguageSetting, SiftSettings, SiftTuning, SortKey, VaultPath } from './types';
@@ -306,7 +306,19 @@ export class SiftSettingTab extends PluginSettingTab {
 		);
 	}
 
+	/**
+	 * The pre-1.13.0 tab. Obsidian marks this deprecated because the declarative
+	 * definitions replace it, and from 1.13.0 on it is never called - but
+	 * manifest.json admits 1.8.7, where it is the only way the tab exists at
+	 * all. It is a one-line adapter so that nothing inside the plugin has to
+	 * call a deprecated method to redraw; {@link refresh} calls {@link paint}.
+	 */
 	override display(): void {
+		this.paint();
+	}
+
+	/** Builds the tab imperatively. The body of the old `display()`. */
+	private paint(): void {
 		const { containerEl } = this;
 		containerEl.empty();
 		containerEl.addClass('sift-settings');
@@ -332,6 +344,212 @@ export class SiftSettingTab extends PluginSettingTab {
 	override hide(): void {
 		this.commitLater.run();
 		super.hide();
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* Declarative definitions - Obsidian 1.13.0 and newer                    */
+	/* ---------------------------------------------------------------------- */
+
+	/**
+	 * The same settings as {@link display}, declared instead of built.
+	 *
+	 * From 1.13.0 on Obsidian renders the tab from this array and does not call
+	 * `display()` at all. `display()` stays because `manifest.json` still admits
+	 * 1.8.7, so both have to describe the same tab. They agree by construction:
+	 * the labels come from the same i18n keys, and every write goes through
+	 * {@link setControlValue}, which applies the same guards the imperative
+	 * handlers do.
+	 *
+	 * The reason for declaring them at all is Obsidian's settings search. A
+	 * setting the app cannot enumerate is one the user cannot find by typing
+	 * its name, and the imperative tab is opaque to it.
+	 */
+	override getSettingDefinitions(): SettingDefinitionItem[] {
+		// No group around the first block: the guidelines reserve the top of a
+		// tab for the general options and want a heading only where a second
+		// section starts. Same reasoning as in display().
+		return [
+			{
+				name: t('settings.defaultSort.name'),
+				desc: t('settings.defaultSort.desc'),
+				control: { type: 'dropdown', key: 'defaultSort', options: labelled(sortOptions()) },
+			},
+			{
+				name: t('settings.snippetCount.name'),
+				desc: t('settings.snippetCount.desc'),
+				control: {
+					type: 'slider',
+					key: 'snippetCount',
+					min: SNIPPET_COUNT_MIN,
+					max: SNIPPET_COUNT_MAX,
+					step: 1,
+				},
+			},
+			{
+				name: t('settings.createdField.name'),
+				desc: t('settings.createdField.desc'),
+				control: {
+					type: 'text',
+					key: 'createdField',
+					placeholder: t('settings.createdField.placeholder'),
+				},
+			},
+			{
+				name: t('settings.excludedFolders.name'),
+				desc: t('settings.excludedFolders.desc'),
+				control: {
+					type: 'textarea',
+					key: 'excludedFolders',
+					placeholder: t('settings.excludedFolders.placeholder'),
+					rows: 4,
+				},
+			},
+			{
+				name: t('settings.language.name'),
+				desc: t('settings.language.desc'),
+				control: { type: 'dropdown', key: 'language', options: labelled(languageOptions()) },
+			},
+			{
+				name: t('settings.fuzzyByDefault.name'),
+				desc: t('settings.fuzzyByDefault.desc'),
+				control: { type: 'toggle', key: 'fuzzyByDefault' },
+			},
+			{
+				name: t('settings.includeSubfolders.name'),
+				desc: t('settings.includeSubfolders.desc'),
+				control: { type: 'toggle', key: 'includeSubfoldersByDefault' },
+			},
+			{
+				name: t('settings.maxResults.name'),
+				desc: t('settings.maxResults.desc'),
+				control: {
+					type: 'slider',
+					key: 'maxResults',
+					min: MAX_RESULTS_MIN,
+					max: MAX_RESULTS_MAX,
+					step: MAX_RESULTS_STEP,
+				},
+			},
+			{
+				type: 'group',
+				heading: t('settings.heading.index'),
+				// Rendered rather than declared: the status line is a reading of
+				// live index state, and the buttons act instead of holding a
+				// value. Both reuse the imperative builders, so there is one
+				// implementation of each, not two.
+				items: [
+					{
+						name: statusLine(this.readStats(), this.readFailure()),
+						searchable: false,
+						render: (setting) => {
+							this.fillIndexStatus(setting);
+						},
+					},
+					{
+						name: t('index.rebuild'),
+						desc: t('index.rebuild.desc'),
+						render: (setting) => {
+							this.fillRebuild(setting);
+						},
+					},
+				],
+			},
+		];
+	}
+
+	/**
+	 * Reads a value for the declarative renderer. The two free-text controls
+	 * hold a different shape than the setting does, so they convert here and in
+	 * {@link setControlValue} rather than anywhere else.
+	 */
+	override getControlValue(key: string): unknown {
+		if (key === 'excludedFolders') return this.settings.excludedFolders.join('\n');
+		return this.settings[key as keyof SiftSettings];
+	}
+
+	/**
+	 * Writes a value from the declarative renderer, through the same guards the
+	 * imperative handlers use: an out-of-range number falls back to its default,
+	 * a folder list is sanitized, and the two settings that invalidate the index
+	 * are committed late instead of on every keystroke.
+	 */
+	override setControlValue(key: string, value: unknown): void {
+		switch (key) {
+			case 'defaultSort':
+				this.settings.defaultSort = isSortKey(value) ? value : DEFAULT_SETTINGS.defaultSort;
+				void this.persist();
+				return;
+			case 'snippetCount':
+				this.settings.snippetCount = migrateNumber(
+					value,
+					DEFAULT_SETTINGS.snippetCount,
+					SNIPPET_COUNT_MIN,
+					SNIPPET_COUNT_MAX,
+				);
+				void this.persist();
+				return;
+			case 'maxResults':
+				this.settings.maxResults = migrateNumber(
+					value,
+					DEFAULT_SETTINGS.maxResults,
+					MAX_RESULTS_MIN,
+					MAX_RESULTS_MAX,
+				);
+				void this.persist();
+				return;
+			case 'createdField':
+				this.settings.createdField = migrateCreatedField(value);
+				this.commitLater();
+				return;
+			case 'excludedFolders':
+				this.settings.excludedFolders = sanitizeFolders(
+					(typeof value === 'string' ? value : '').split('\n'),
+				);
+				this.commitLater();
+				return;
+			case 'language': {
+				const language = isLanguage(value) ? value : DEFAULT_SETTINGS.language;
+				this.settings.language = language;
+				void this.persist();
+				// Applied here as well as on load, so the tab answers in the new
+				// language immediately instead of after a restart.
+				setLanguage(language, getLanguage());
+				this.refresh();
+				return;
+			}
+			case 'fuzzyByDefault':
+				this.settings.fuzzyByDefault = value === true;
+				void this.persist();
+				return;
+			case 'includeSubfoldersByDefault':
+				this.settings.includeSubfoldersByDefault = value === true;
+				void this.persist();
+				return;
+			default:
+				return;
+		}
+	}
+
+	/**
+	 * Redraws the tab whichever way it was drawn.
+	 *
+	 * `update()` arrived with the declarative API in 1.13.0 and is the only
+	 * correct redraw there: calling `display()` under it would empty the
+	 * container and paint an imperative tab over the declarative one. On 1.8.7
+	 * the method does not exist, so the check is a runtime one, not a version
+	 * comparison against a string in the manifest.
+	 */
+	private refresh(): void {
+		// Typed as optional on purpose, which is what it actually is here:
+		// `update()` exists from 1.13.0, and manifest.json admits 1.8.7. The
+		// runtime check is the only place that question can be answered, and
+		// this shape says so without claiming an API the minimum version lacks.
+		const update = (this as { update?: () => void }).update;
+		if (typeof update === 'function') {
+			update.call(this);
+			return;
+		}
+		this.paint();
 	}
 
 	/* ---------------------------------------------------------------------- */
@@ -422,7 +640,7 @@ export class SiftSettingTab extends PluginSettingTab {
 					// Applied here as well as on load, so the tab answers in the new
 					// language immediately instead of after a restart.
 					setLanguage(language, getLanguage());
-					this.display();
+					this.refresh();
 				});
 			});
 	}
@@ -492,9 +710,19 @@ export class SiftSettingTab extends PluginSettingTab {
 	 * go right next to it rather than in a notice the user has already dismissed.
 	 */
 	private renderIndexStatus(containerEl: HTMLElement): void {
+		this.fillIndexStatus(new Setting(containerEl));
+	}
+
+	/**
+	 * Fills a row with the status, wherever the row came from: `new Setting()`
+	 * under {@link display}, or the one the declarative renderer hands to the
+	 * definition's `render`. Setting the name here as well as in the definition
+	 * is deliberate - it keeps this the single place the line is composed.
+	 */
+	private fillIndexStatus(setting: Setting): void {
 		const stats = this.readStats();
 		const failure = this.readFailure();
-		const setting = new Setting(containerEl).setClass('sift-index-status').setName(statusLine(stats, failure));
+		setting.setClass('sift-index-status').setName(statusLine(stats, failure));
 		if (failure !== null) {
 			setting.setDesc(t('index.failureReason', { reason: failure }));
 			setting.addButton((button) =>
@@ -513,7 +741,11 @@ export class SiftSettingTab extends PluginSettingTab {
 	}
 
 	private renderRebuild(containerEl: HTMLElement): void {
-		new Setting(containerEl)
+		this.fillRebuild(new Setting(containerEl));
+	}
+
+	private fillRebuild(setting: Setting): void {
+		setting
 			.setName(t('index.rebuild'))
 			.setDesc(t('index.rebuild.desc'))
 			.addButton((button) =>
@@ -548,7 +780,7 @@ export class SiftSettingTab extends PluginSettingTab {
 			new Notice(t('error.indexFailed'));
 		}
 		button.setDisabled(false);
-		this.display();
+		this.refresh();
 	}
 
 	/* ---------------------------------------------------------------------- */
@@ -601,6 +833,13 @@ export class SiftSettingTab extends PluginSettingTab {
 /* ========================================================================== */
 /* 4. Formatting helpers                                                      */
 /* ========================================================================== */
+
+/** Option pairs as the declarative dropdown wants them: value -> visible label. */
+function labelled(options: ReadonlyArray<readonly [string, TranslationKey]>): Record<string, string> {
+	const record: Record<string, string> = {};
+	for (const [value, labelKey] of options) record[value] = t(labelKey);
+	return record;
+}
 
 function sortOptions(): ReadonlyArray<readonly [SortKey, TranslationKey]> {
 	return Object.entries(SORT_LABEL_KEYS).map(([key, labelKey]) => [key as SortKey, labelKey] as const);
