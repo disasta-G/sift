@@ -25,6 +25,9 @@
 	"filter.remove": "Diesen Filter entfernen",
 	"filter.clearAll": "Alle Filter entfernen",
 	"filter.includeSubfolders": "Unterordner einbeziehen",
+	"filter.thisNote": "Diese Notiz",
+	"filter.thisNoteTooltip": "Nur in der geöffneten Notiz suchen",
+	"filter.thisNoteNone": "Es ist keine Notiz geöffnet",
 	"filter.similar": "Ähnlich",
 	"filter.similarTooltip": "Findet auch ähnliche Schreibweisen",
 	"filter.created": "Erstellt",
@@ -64,6 +67,7 @@
 
 	"curate.keep": "Diesen Treffer merken",
 	"curate.dismiss": "Diesen Treffer verwerfen",
+	"curate.temporary": "Nur für diese Suche",
 	"curate.undo": "Rückgängig",
 	"curate.left": "{n} übrig · {dismissed} verworfen",
 	"curate.keptCount": "{n} gemerkt",
@@ -126,10 +130,12 @@
 	"index.rebuild.done": "Index neu aufgebaut, {count} Notizen.",
 
 	"settings.keepHotkey.name": "Tastenkürzel zum Merken",
-	"settings.keepHotkey.desc": "Kombination, die den gewählten Treffer merkt, solange die Suche offen ist. Mindestens eine Zusatztaste ist nötig; Ctrl bedeutet auf macOS Cmd. Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X und Ctrl+Z stehen dann im Suchfeld nicht mehr zum Bearbeiten zur Verfügung.",
+	"settings.keepHotkey.desc": "Kombination, die den gewählten Treffer merkt, solange die Suche offen ist. Cursor ins Feld setzen und die Tasten drücken. Mindestens eine Zusatztaste ist nötig; Ctrl wird auf macOS als Cmd gespeichert. Eine Kombination, die das Suchfeld zum Bearbeiten braucht, ist dort dann nicht mehr verfügbar.",
 	"settings.dismissHotkey.name": "Tastenkürzel zum Verwerfen",
 	"settings.dismissHotkey.desc": "Kombination, die den gewählten Treffer aus diesem Durchgang entfernt. Es gelten dieselben Regeln.",
 
+	"settings.hotkey.press": "Kombination drücken",
+	"settings.hotkey.reset": "Zurück zur Standardkombination",
 	"settings.heading.index": "Index",
 	"settings.defaultSort.name": "Standardsortierung",
 	"settings.defaultSort.desc": "Sortierung, mit der eine neu geöffnete Suche startet.",

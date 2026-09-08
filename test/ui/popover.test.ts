@@ -154,13 +154,14 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedFrom: null,
 		modifiedTo: null,
 		property: null,
+		note: null,
 		excludedFolders: [],
 		...overrides,
 	};
 }
 
 function baseState(): FilterBarState {
-	return { filters: baseFilters(), sort: 'relevance', fuzzy: false, summary: null };
+	return { filters: baseFilters(), sort: 'relevance', fuzzy: false, activeNote: null, summary: null };
 }
 
 function mountInModal(): { bar: FilterBar; modal: HTMLElement } {

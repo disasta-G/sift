@@ -451,6 +451,15 @@ export interface SearchFilters {
 	modifiedTo: Millis | null;
 	/** One frontmatter property the note has to carry. `null` = no constraint. */
 	property: PropertyFilter | null;
+	/**
+	 * A single note the search is confined to, or `null` for the whole vault.
+	 *
+	 * Set by the "This note" switch, which the modal fills with the file that was
+	 * open when the overlay was called. It is a path rather than a flag so the
+	 * Searcher stays free of any notion of what is on screen, and so the run is
+	 * pinned to the note it started on even if the workspace moves underneath it.
+	 */
+	note: VaultPath | null;
 	/** From settings, not from the filter bar. Applied on top of everything else. */
 	excludedFolders: readonly VaultPath[];
 }
@@ -818,6 +827,11 @@ export interface FilterBarState {
 	filters: SearchFilters;
 	sort: SortKey;
 	fuzzy: boolean;
+	/**
+	 * The note that was open when the overlay was called, `null` when none was.
+	 * The "This note" switch reads it, and is not offered without one.
+	 */
+	activeNote: VaultPath | null;
 	/** Rendered as "12 Treffer · 38 ms"; `null` before the first search. */
 	summary: SearchSummary | null;
 }

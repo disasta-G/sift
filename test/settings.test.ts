@@ -37,6 +37,7 @@ interface FakePlugin {
 	indexer: { stats(): IndexStats; lastError(): string | null };
 	saveSettings(): Promise<void>;
 	rebuildIndex(): Promise<void>;
+	registerDomEvent(el: HTMLElement, type: string, handler: EventListener): void;
 }
 
 interface Harness {
@@ -92,6 +93,12 @@ function createHarness(overrides: Partial<SiftSettings> = {}): Harness {
 				harness.rebuilds += 1;
 				return rebuildFails ? Promise.reject(new Error('disk full')) : Promise.resolve();
 			},
+			// The real `Plugin.registerDomEvent`: it attaches and hands the
+			// detaching to the plugin's own unload. The tab uses it for the two
+			// hotkey fields, which record a key press.
+			registerDomEvent(el: HTMLElement, type: string, handler: EventListener): void {
+				el.addEventListener(type, handler);
+			},
 		},
 		container: undefined as unknown as HTMLElement,
 		saves,
@@ -145,6 +152,16 @@ function setSelect(el: HTMLSelectElement, value: string): void {
 function type(el: HTMLInputElement | HTMLTextAreaElement, value: string): void {
 	el.value = value;
 	el.dispatchEvent(new Event('input'));
+}
+
+/** One key press on a hotkey field. Returns the event, so a test can see whether it was swallowed. */
+function press(
+	el: HTMLInputElement,
+	init: { code: string; key: string; ctrlKey?: boolean; metaKey?: boolean; altKey?: boolean; shiftKey?: boolean },
+): KeyboardEvent {
+	const evt = new KeyboardEvent('keydown', { ...init, bubbles: true, cancelable: true });
+	el.dispatchEvent(evt);
+	return evt;
 }
 
 function setSlider(el: HTMLInputElement, value: number): void {
@@ -826,50 +843,73 @@ describe('changing a setting the index depends on', () => {
 		expect(indexFingerprint(harness.plugin.settings)).not.toBe(before);
 	});
 
-	it('lets a combination be typed one character at a time', () => {
-		vi.useFakeTimers();
+	it('records a pressed combination, which is what a hotkey field is for', () => {
 		const harness = createHarness();
 		harness.tab.display();
 		const input = settingByClass(harness, 'sift-setting-keep-hotkey').querySelector('input');
 		if (input === null) throw new Error('no keep-hotkey input');
 
-		// `A`, `Al`, `Alt` and `Alt+` are all unusable as a hotkey. Refusing them
-		// used to leave the stored value in place, which the declarative renderer
-		// echoed back into the box - so the field snapped back to the old
-		// combination on the first keystroke and nothing could be typed.
-		for (const value of ['A', 'Al', 'Alt', 'Alt+', 'Alt+D']) type(input, value);
-		expect(harness.plugin.settings.keepHotkey).toBe('Alt+D');
+		// Nobody types "Alt+D" into a hotkey field: they press the keys, which
+		// inserts no characters at all. The field records the press instead.
+		press(input, { code: 'KeyD', key: 'd', altKey: true });
 
-		vi.advanceTimersByTime(1000);
+		expect(harness.plugin.settings.keepHotkey).toBe('Alt+D');
+		expect(input.value).toBe('Alt+D');
 		expect(harness.saves.length).toBe(1);
 	});
 
-	it('keeps the half-written value while it is being typed', () => {
-		vi.useFakeTimers();
+	it('reads the physical key, so a remapped Alt still names the letter', () => {
 		const harness = createHarness();
 		harness.tab.display();
 		const input = settingByClass(harness, 'sift-setting-dismiss-hotkey').querySelector('input');
 		if (input === null) throw new Error('no dismiss-hotkey input');
 
-		type(input, 'Alt');
-		// Unusable, and stored as it stands: both readers answer for it - the
-		// overlay falls back to its default binding, and closing the tab replaces
-		// it with the default for good.
-		expect(harness.plugin.settings.dismissHotkey).toBe('Alt');
+		// macOS turns Option+X into a symbol, so `key` is no longer the letter.
+		press(input, { code: 'KeyX', key: '≈', altKey: true, shiftKey: true });
 
-		harness.tab.hide();
-		expect(harness.plugin.settings.dismissHotkey).toBe(DEFAULT_SETTINGS.dismissHotkey);
+		expect(harness.plugin.settings.dismissHotkey).toBe('Alt+Shift+X');
 	});
 
-	it('stores a typed combination in its canonical spelling', () => {
-		vi.useFakeTimers();
+	it('waits while only modifiers are down, and swallows the press either way', () => {
 		const harness = createHarness();
 		harness.tab.display();
 		const input = settingByClass(harness, 'sift-setting-keep-hotkey').querySelector('input');
 		if (input === null) throw new Error('no keep-hotkey input');
+		const before = harness.plugin.settings.keepHotkey;
 
-		type(input, 'strg umschalt j');
-		expect(harness.plugin.settings.keepHotkey).toBe('Mod+Shift+J');
+		// Alt alone is not a combination, and neither is an unmodified letter.
+		const alt = press(input, { code: 'AltLeft', key: 'Alt', altKey: true });
+		const bare = press(input, { code: 'KeyD', key: 'd' });
+
+		expect(harness.plugin.settings.keepHotkey).toBe(before);
+		// Swallowed all the same: a recording field that let Ctrl+P through would
+		// open the command palette while it was being set.
+		expect(alt.defaultPrevented).toBe(true);
+		expect(bare.defaultPrevented).toBe(true);
+	});
+
+	it('refuses a combination the desktop app answers first', () => {
+		const harness = createHarness();
+		harness.tab.display();
+		const input = settingByClass(harness, 'sift-setting-keep-hotkey').querySelector('input');
+		if (input === null) throw new Error('no keep-hotkey input');
+		const before = harness.plugin.settings.keepHotkey;
+
+		press(input, { code: 'KeyW', key: 'w', ctrlKey: true });
+
+		expect(harness.plugin.settings.keepHotkey).toBe(before);
+	});
+
+	it('puts the default back from the reset button', () => {
+		const harness = createHarness({ keepHotkey: 'Alt+J' });
+		harness.tab.display();
+		const row = settingByClass(harness, 'sift-setting-keep-hotkey');
+		const reset = row.querySelector('.clickable-icon');
+		if (!(reset instanceof HTMLElement)) throw new Error('no reset button');
+
+		reset.dispatchEvent(new MouseEvent('click'));
+
+		expect(harness.plugin.settings.keepHotkey).toBe(DEFAULT_SETTINGS.keepHotkey);
 	});
 
 	it('commits the created field once the typing stops', () => {
@@ -984,17 +1024,18 @@ describe('getSettingDefinitions', () => {
 		const harness = createHarness();
 		const keys = controlKeys(harness.tab.getSettingDefinitions());
 
-		// The ten settings on the tab. `version` and `forceRebuild` are not on
-		// it: one is the schema marker, the other is internal rebuild state.
+		// The eight settings the declarative renderer can draw itself. `version`
+		// and `forceRebuild` are not on the tab at all: one is the schema marker,
+		// the other is internal rebuild state. The two hotkeys are on it but are
+		// rendered rather than declared - a field that records a key press is not
+		// one of the control types, so both tabs call the same builder.
 		expect([...keys].sort()).toEqual(
 			[
 				'createdField',
 				'defaultSort',
-				'dismissHotkey',
 				'excludedFolders',
 				'fuzzyByDefault',
 				'includeSubfoldersByDefault',
-				'keepHotkey',
 				'language',
 				'maxResults',
 				'snippetCount',

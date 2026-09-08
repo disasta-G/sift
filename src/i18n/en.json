@@ -25,6 +25,9 @@
 	"filter.remove": "Remove this filter",
 	"filter.clearAll": "Remove all filters",
 	"filter.includeSubfolders": "Include subfolders",
+	"filter.thisNote": "This note",
+	"filter.thisNoteTooltip": "Search only in the note that was open",
+	"filter.thisNoteNone": "No note is open",
 	"filter.similar": "Similar",
 	"filter.similarTooltip": "Also match close spellings",
 	"filter.created": "Created",
@@ -64,6 +67,7 @@
 
 	"curate.keep": "Keep this result",
 	"curate.dismiss": "Dismiss this result",
+	"curate.temporary": "Only for this search",
 	"curate.undo": "Undo dismiss",
 	"curate.left": "{n} left · {dismissed} dismissed",
 	"curate.keptCount": "{n} kept",
@@ -126,10 +130,12 @@
 	"index.rebuild.done": "Index rebuilt, {count} notes.",
 
 	"settings.keepHotkey.name": "Keep hotkey",
-	"settings.keepHotkey.desc": "Combination that keeps the selected result while the search is open. At least one modifier is required, and Ctrl stands for Cmd on macOS. A combination the query field uses for editing is taken over while the search is open.",
+	"settings.keepHotkey.desc": "Combination that keeps the selected result while the search is open. Put the cursor in the field and press it. At least one modifier is required, and Ctrl is stored as Cmd on macOS. A combination the query field uses for editing is taken over while the search is open.",
 	"settings.dismissHotkey.name": "Dismiss hotkey",
 	"settings.dismissHotkey.desc": "Combination that removes the selected result from this run. The same rules apply.",
 
+	"settings.hotkey.press": "Press a combination",
+	"settings.hotkey.reset": "Back to the default combination",
 	"settings.heading.index": "Index",
 	"settings.defaultSort.name": "Default sort order",
 	"settings.defaultSort.desc": "Sort order a newly opened search starts with.",

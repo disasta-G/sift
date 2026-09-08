@@ -158,6 +158,56 @@ export function formatHotkey(value: unknown, mac: boolean): string {
 	return mac ? parts.join('') : parts.join(' ');
 }
 
+/** The parts of a `KeyboardEvent` a combination is read from. */
+export interface HotkeyEvent {
+	ctrlKey: boolean;
+	metaKey: boolean;
+	altKey: boolean;
+	shiftKey: boolean;
+	/** `KeyboardEvent.code`: the physical key, independent of the layout. */
+	code: string;
+	/** `KeyboardEvent.key`: what the layout makes of it. Only read as a fallback. */
+	key: string;
+}
+
+/**
+ * The combination a key press stands for, or `null` when it is not one that can
+ * be bound.
+ *
+ * `code` before `key`, and this is the whole reason the settings field records a
+ * press instead of reading typed text: with Alt held down, macOS turns Option+D
+ * into `∂` and a Windows layout can do the same, so `key` no longer names the
+ * letter that was struck. `code` says `KeyD` either way.
+ *
+ * A press of a modifier on its own is not a combination and returns `null`
+ * rather than an error - the field goes on waiting for the key that follows.
+ */
+export function hotkeyFromEvent(evt: HotkeyEvent): string | null {
+	const modifiers: HotkeyModifier[] = [];
+	// Ctrl and Cmd both become `Mod`, which is what makes one stored value right
+	// on macOS and on Windows.
+	if (evt.ctrlKey || evt.metaKey) modifiers.push('Mod');
+	if (evt.altKey) modifiers.push('Alt');
+	if (evt.shiftKey) modifiers.push('Shift');
+	const key = keyFromEvent(evt);
+	if (key === null || modifiers.length === 0) return null;
+	// Through the parser, so a press is refused for exactly the reasons a typed
+	// value is - the window-level combinations above.
+	return canonicalHotkey([...modifiers, key].join('+'));
+}
+
+/** The key a press names, from its physical code where that is unambiguous. */
+function keyFromEvent(evt: HotkeyEvent): string | null {
+	const letter = /^Key([A-Z])$/u.exec(evt.code);
+	if (letter !== null) return letter[1];
+	const digit = /^(?:Digit|Numpad)([0-9])$/u.exec(evt.code);
+	if (digit !== null) return digit[1];
+	if (/^F[1-9]$|^F1[0-2]$/u.test(evt.code)) return evt.code;
+	// Anything else - Enter, Home, the punctuation keys - is read from `key`,
+	// where `normalizeKeyName` decides whether it is bindable at all.
+	return normalizeKeyName(evt.key);
+}
+
 /** One key name, upper-cased for letters and digits, `null` when it names no single key. */
 function normalizeKeyName(part: string): string | null {
 	if (part.length === 1) {

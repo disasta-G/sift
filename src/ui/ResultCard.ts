@@ -56,6 +56,10 @@ const ELLIPSIS = '…';
 /** The separator the mockup renders around every path segment. */
 const PATH_SEPARATOR = ' / ';
 
+/** The "keep" button's icon, unkept and kept. Two shapes, not one shape in two colours. */
+const KEEP_ICON_OFF = 'bookmark';
+const KEEP_ICON_ON = 'bookmark-check';
+
 /** Prefix of the DOM id of a card, referenced by the input's `aria-activedescendant`. */
 export const CARD_ID_PREFIX = 'sift-result-';
 
@@ -130,7 +134,7 @@ export class ResultCard {
 		this.lifecycle.load();
 		if (curation !== undefined) {
 			const actions = head.createDiv({ cls: 'sift-card__actions' });
-			this.keepEl = this.buildAction(actions, 'keep', 'bookmark', 'curate.keep', () => {
+			this.keepEl = this.buildAction(actions, 'keep', KEEP_ICON_OFF, 'curate.keep', () => {
 				curation.onKeep(this.model.index);
 			});
 			this.buildAction(actions, 'dismiss', 'x', 'curate.dismiss', () => {
@@ -203,8 +207,16 @@ export class ResultCard {
 	 */
 	setKept(kept: boolean): void {
 		this.el.toggleClass('sift-card--kept', kept);
-		this.keepEl?.toggleClass('sift-card__action--on', kept);
 		this.keepEl?.setAttr('aria-pressed', kept ? 'true' : 'false');
+		const keepEl = this.keepEl;
+		if (keepEl === null) return;
+		keepEl.toggleClass('sift-card__action--on', kept);
+		// The icon itself changes, not only its colour: an accent-coloured outline
+		// and a muted one are the same shape, and on the row the eye scans that is
+		// the difference between "kept" and "not kept". A filled bookmark with a
+		// check reads as done at a glance and does not depend on the theme's
+		// accent being distinguishable from its muted text.
+		setIcon(keepEl, kept ? KEEP_ICON_ON : KEEP_ICON_OFF);
 	}
 
 	/**

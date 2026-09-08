@@ -27,11 +27,23 @@ The settings tab. It reports how many notes are indexed and how much memory the 
 - **Operators.** Spaces mean AND, `"quoted text"` is an exact phrase, `-word` excludes, `a OR b` accepts either.
 - **Field prefixes.** `path:`, `tag:`, `title:` and `prop:` limit a single term to that field. `prop:status` finds every note that has a `status` property, `prop:status=offen` only those whose value contains `offen`, and `-prop:status` excludes them.
 - **Path, property and date filters.** Restrict a search to one folder, with or without its subfolders; to a note property, either by its presence alone or by a value; and to a created or modified date range, with quick picks for today, the last 7 days, 30 days and year. The property chip completes both the name and the value from the properties your vault actually uses.
+- **Search inside one note.** The "This note" switch confines the run to the note that was open when you called the overlay — the whole query language, filters included, applied to a single file.
 - **Ranked results.** Hits in the title, in frontmatter, in a tag and in a heading count for more than hits in the body; several matching terms close together count for more than the same terms far apart; whole-word matches get a bonus and recently edited notes a small one. The result is shown as a relevance value from 0 to 100. The order can be switched to created, modified, title or path at any time.
 - **Excerpts with highlighted hits.** Every card shows up to three excerpts of about 160 characters, cut from the original note text, so umlauts, casing and Markdown look exactly as you wrote them. The sentence around the hit is rendered in the normal text colour, its surroundings muted.
 - **Keyboard-first overlay.** Open, type, navigate and open a note without touching the mouse. Opening a hit places the cursor on the exact match position in the note.
 - **Optional typo tolerance.** The "Similar" toggle also accepts close spellings — `Espresomaschine` and `Kafeemaschine` still find the espresso machine note. It is off by default, never applies inside a phrase, and a card found this way says which word it actually matched.
 - **English and German interface.** The language follows the Obsidian interface language and can be set explicitly.
+
+## Keeping and dismissing
+
+While a result list is open you can mark a hit as worth keeping and remove one
+you do not want to see, either with the two buttons on the card or with the
+hotkeys below. "Open all" then opens what is left, or only what you kept.
+
+**This shapes the run and nothing else.** Nothing is written to your notes, no
+tag and no property is set, and closing the overlay forgets all of it — the next
+search starts from the full result list again. The footer says so as soon as
+something is kept or dismissed.
 
 ## Properties
 
@@ -116,11 +128,13 @@ Each chip can be removed individually; nothing is remembered between two searche
 
 ### Changing the two curation hotkeys
 
-They are typed into the settings as a combination, for example `Ctrl+Shift+K`,
-`Ctrl+J` or `Alt+Shift+D`. Case, spacing and the separator do not matter, and
-`Ctrl` is read as Cmd on macOS, so one setting is right on both platforms. The
-footer of the search overlay always names the combination that is actually
-bound.
+Put the cursor in the field and press the combination — the field records it,
+the way Obsidian's own hotkey editor does. It reads the physical key rather than
+the character it produces, so `Alt+D` is recorded as `Alt+D` even on a layout
+that turns Option+D into a symbol. `Ctrl` is stored as Cmd on macOS, so one
+setting is right on both platforms, and the button beside the field puts the
+default back. The footer of the search overlay always names the combination that
+is actually bound.
 
 Two rules apply. At least one modifier is required — the query field owns every
 unmodified key. And `Ctrl+W`, `Ctrl+Q`, `Ctrl+N`, `Ctrl+T` and `Ctrl+R` are

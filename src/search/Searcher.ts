@@ -245,6 +245,7 @@ export function hasActiveFilters(filters: SearchFilters): boolean {
 	if (filters.createdFrom !== null || filters.createdTo !== null) return true;
 	if (filters.modifiedFrom !== null || filters.modifiedTo !== null) return true;
 	if (filters.property !== null) return true;
+	if (filters.note !== null) return true;
 	if (filters.folder === null) return false;
 	return trimSlashes(filters.folder.trim()).length > 0 || !filters.includeSubfolders;
 }
@@ -1069,6 +1070,9 @@ export class Searcher {
 		if (filters.modifiedFrom !== null && file.modifiedAt < filters.modifiedFrom) return false;
 		if (filters.modifiedTo !== null && file.modifiedAt > filters.modifiedTo) return false;
 		if (filters.property !== null && !hasProperty(file, filters.property)) return false;
+		// One note, by path: the narrowest filter there is, and the only one that
+		// can make the whole vault irrelevant, so it is worth testing early.
+		if (filters.note !== null && file.path !== filters.note) return false;
 		return true;
 	}
 

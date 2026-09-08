@@ -178,6 +178,8 @@ export interface FakeWorkspace {
 	/** Test affordance: runs the callbacks queued by `onLayoutReady`. */
 	triggerLayoutReady(): void;
 	getLeaf(newLeaf?: boolean | string): FakeLeaf;
+	/** The note the overlay would confine a "this note" search to. The fake has none open. */
+	getActiveFile(): null;
 	getActiveViewOfType(): null;
 	on(name: string, handler: Handler): EventRef;
 	off(name: string, handler: Handler): void;
@@ -515,6 +517,7 @@ export function createFakeApp(files: Record<string, FakeFileSpec>): FakeApp {
 			const queued = layoutReadyCallbacks.splice(0, layoutReadyCallbacks.length);
 			for (const callback of queued) callback();
 		},
+		getActiveFile: () => null,
 		getLeaf: () => {
 			const opened: string[] = [];
 			const leaf: FakeLeaf = {

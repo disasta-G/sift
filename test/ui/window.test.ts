@@ -170,6 +170,7 @@ function open(count: number, overrides: Partial<SiftSettings> = {}): Harness {
 			},
 		},
 		workspace: {
+			getActiveFile: (): TFile | null => null,
 			getLeaf: () => ({
 				view: {},
 				openFile: (file: TFile): Promise<void> => {

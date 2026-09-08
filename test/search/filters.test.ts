@@ -76,6 +76,7 @@ function filtersWith(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedFrom: null,
 		modifiedTo: null,
 		property: null,
+		note: null,
 		excludedFolders: [],
 		...overrides,
 	};
@@ -212,6 +213,20 @@ describe('Searcher — property filter', () => {
 	it('counts as an active filter, so it searches on its own', () => {
 		expect(hasActiveFilters(filtersWith({ property: { key: 'status', value: null } }))).toBe(true);
 		expect(hasActiveFilters(filtersWith())).toBe(false);
+	});
+});
+
+describe('Searcher — note filter', () => {
+	it('keeps the one note and nothing else', () => {
+		expect(passing(small, filtersWith({ note: ALPHA }))).toEqual([ALPHA]);
+	});
+
+	it('matches nothing for a note that is not in the index', () => {
+		expect(passing(small, filtersWith({ note: 'Weg.md' }))).toEqual([]);
+	});
+
+	it('counts as an active filter, so one note can be searched without a term', () => {
+		expect(hasActiveFilters(filtersWith({ note: ALPHA }))).toBe(true);
 	});
 });
 

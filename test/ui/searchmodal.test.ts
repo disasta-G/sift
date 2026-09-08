@@ -66,6 +66,7 @@ function createApp(files: Record<string, string> = {}): Harness {
 			},
 		},
 		workspace: {
+			getActiveFile: (): TFile | null => null,
 			getLeaf: (target: boolean | string) => {
 				const view = new MarkdownView(null);
 				const record: FakeLeafRecord = { target, opened: [], view };

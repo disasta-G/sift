@@ -193,6 +193,15 @@ export class SearchModal extends Modal {
 	private confirmingOpen = false;
 
 	/**
+	 * The note that was open when the overlay was called, `null` when none was.
+	 *
+	 * Read once, on open, and then left alone: the overlay takes the focus away
+	 * from the note the moment it appears, and a "this note" filter that followed
+	 * the workspace would change what it means halfway through a run.
+	 */
+	private activeNote: VaultPath | null = null;
+
+	/**
 	 * Property names of the vault and the values recorded under each, built on
 	 * the first suggestion request and kept for as long as the overlay is open.
 	 *
@@ -236,6 +245,7 @@ export class SearchModal extends Modal {
 	private emptyEl: HTMLElement | null = null;
 	private filterBar: FilterBar | null = null;
 	private curateEl: HTMLElement | null = null;
+	private curateNoteEl: HTMLElement | null = null;
 	private curateStatusEl: HTMLElement | null = null;
 	private undoEl: HTMLButtonElement | null = null;
 	private cancelOpenEl: HTMLButtonElement | null = null;
@@ -255,12 +265,14 @@ export class SearchModal extends Modal {
 			modifiedFrom: null,
 			modifiedTo: null,
 			property: null,
+			note: null,
 			excludedFolders: [...deps.settings.excludedFolders],
 		};
 	}
 
 	override onOpen(): void {
 		this.opened = true;
+		this.activeNote = this.app.workspace.getActiveFile()?.path ?? null;
 		this.lifecycle.load();
 		this.modalEl.addClass('sift-modal');
 		this.containerEl.addClass('sift-modal-container');
@@ -271,7 +283,13 @@ export class SearchModal extends Modal {
 		this.filterBar = new FilterBar(
 			this.app,
 			this.contentEl,
-			{ filters: this.filters, sort: this.sort, fuzzy: this.fuzzy, summary: null },
+			{
+				filters: this.filters,
+				sort: this.sort,
+				fuzzy: this.fuzzy,
+				activeNote: this.activeNote,
+				summary: null,
+			},
 			{
 				onFiltersChange: (filters) => {
 					this.filters = filters;
@@ -324,6 +342,7 @@ export class SearchModal extends Modal {
 		this.modalEl.removeClass('sift-modal');
 		this.containerEl.removeClass('sift-modal-container');
 		this.propertyCatalogue = null;
+		this.activeNote = null;
 		this.inputEl = null;
 		this.countEl = null;
 		this.filterToggleEl = null;
@@ -334,6 +353,7 @@ export class SearchModal extends Modal {
 		this.bottomSpacerEl = null;
 		this.emptyEl = null;
 		this.curateEl = null;
+		this.curateNoteEl = null;
 		this.curateStatusEl = null;
 		this.undoEl = null;
 		this.cancelOpenEl = null;
@@ -852,6 +872,13 @@ export class SearchModal extends Modal {
 	private buildCurateGroup(footer: HTMLElement): void {
 		const group = footer.createDiv({ cls: 'sift-curate' });
 		this.curateEl = group;
+		// Keeping and dismissing shape THIS run and nothing else: no note is
+		// touched, no tag is written, and reopening the search brings every
+		// dismissed hit back. That is not visible from a bookmark icon, and a user
+		// who reads it as a permanent mark on the note would be right to be
+		// alarmed. The line appears with the group, so it is on screen exactly
+		// while there is something curated to explain.
+		this.curateNoteEl = group.createSpan({ cls: 'sift-curate__note', text: t('curate.temporary') });
 		this.curateStatusEl = group.createSpan({
 			cls: 'sift-curate__status',
 			attr: { role: 'status', 'aria-live': 'polite' },
@@ -893,6 +920,13 @@ export class SearchModal extends Modal {
 		if (group === null) return;
 		const hasRun = this.items.length > 0 || this.dismissed.length > 0;
 		group.toggleClass('sift-curate--visible', hasRun);
+		// Only once something has actually been curated: a permanent caption under
+		// every search would be noise, and there would be nothing for it to
+		// qualify.
+		this.curateNoteEl?.toggleClass(
+			'sift-curate__note--visible',
+			this.kept.size > 0 || this.dismissed.length > 0,
+		);
 		this.undoEl?.toggleClass('sift-curate__button--hidden', this.dismissed.length === 0);
 		this.cancelOpenEl?.toggleClass('sift-curate__button--hidden', !this.confirmingOpen);
 
@@ -1514,6 +1548,7 @@ export class SearchModal extends Modal {
 			filters: this.filters,
 			sort,
 			fuzzy: this.fuzzy,
+			activeNote: this.activeNote,
 			summary: this.summary,
 		});
 	}

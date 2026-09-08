@@ -433,6 +433,8 @@ export class FilterBar {
 	private readonly propertyKeyEl: HTMLInputElement;
 	private readonly propertyValueEl: HTMLInputElement;
 	private readonly propertyRemoveEl: HTMLElement;
+	private readonly noteEl: HTMLInputElement;
+	private readonly noteLabelEl: HTMLElement;
 	private readonly subfoldersEl: HTMLInputElement;
 	private readonly subfoldersLabelEl: HTMLElement;
 	private readonly fuzzyEl: HTMLInputElement;
@@ -605,6 +607,16 @@ export class FilterBar {
 			this.emitFilters({ includeSubfolders: this.subfoldersEl.checked });
 		});
 
+		// Confined to the note the overlay was called from. Off unless there was
+		// one: a switch that cannot narrow anything is worse than no switch.
+		const note = this.buildToggle('filter.thisNote', 'sift-toggle--note');
+		this.noteEl = note.input;
+		this.noteLabelEl = note.label;
+		this.noteEl.setAttr('title', t('filter.thisNoteTooltip'));
+		this.lifecycle.registerDomEvent(this.noteEl, 'change', () => {
+			this.emitFilters({ note: this.noteEl.checked ? this.state.activeNote : null });
+		});
+
 		const fuzzy = this.buildToggle('filter.similar', 'sift-toggle--similar');
 		this.fuzzyEl = fuzzy.input;
 		this.fuzzyLabelEl = fuzzy.label;
@@ -731,7 +743,7 @@ export class FilterBar {
 		}
 
 		/* --- spacer, sort, live region -------------------------------------- */
-		this.el.createDiv({ cls: 'sift-filters__spacer' });
+		const spacer = this.el.createDiv({ cls: 'sift-filters__spacer' });
 
 		const sort = this.el.createDiv({ cls: 'sift-sort' });
 		const sortIcon = sort.createSpan({ cls: 'sift-sort__icon' });
@@ -755,6 +767,21 @@ export class FilterBar {
 			cls: 'sift-filters__status',
 			attr: { 'aria-live': 'polite', role: 'status' },
 		});
+
+		// The order the bar READS in, which is not the order the controls are built
+		// in: what narrows the search comes first - folder, property, date - then
+		// how the result is ordered, and the two switches close the row on the
+		// right. Appending a child that is already there moves it, so this is the
+		// one place the order is stated, rather than a construction sequence that
+		// has to be reshuffled whenever a control is added.
+		// The switches move into a group of their own, pushed right by an auto
+		// margin rather than by the spacer: on a bar narrow enough to wrap, an
+		// auto margin still holds them at the right end of the line they land on,
+		// where a spacer would leave them stranded on the left.
+		const switches = this.el.createDiv({ cls: 'sift-filters__switches' });
+		switches.append(this.noteLabelEl, this.subfoldersLabelEl, this.fuzzyLabelEl);
+		spacer.remove();
+		this.el.append(this.pathChipEl, this.propertyChipEl, this.dateWrapEl, sort, switches, this.statusEl);
 
 		this.renderAll();
 	}
@@ -1030,6 +1057,7 @@ export class FilterBar {
 
 	private renderControls(): void {
 		this.renderPath();
+		this.renderNote();
 		this.renderProperty();
 		this.renderSubfolders();
 		this.applyFuzzy();
@@ -1059,6 +1087,22 @@ export class FilterBar {
 		// where it is. The remove button clears both boxes itself.
 		this.propertyChipEl.toggleClass('sift-chip--active', property !== null);
 		this.propertyRemoveEl.toggleClass('sift-chip__remove--visible', property !== null);
+	}
+
+	/**
+	 * The "This note" switch. Without an open note there is nothing to confine
+	 * the search to, so the switch is disabled and says why, rather than being
+	 * hidden - a control that comes and goes is harder to find than one that is
+	 * visibly unavailable.
+	 */
+	private renderNote(): void {
+		const active = this.state.activeNote;
+		const on = this.state.filters.note !== null;
+		if (this.noteEl.checked !== on) this.noteEl.checked = on;
+		this.noteEl.disabled = active === null;
+		this.noteLabelEl.toggleClass('sift-toggle--on', on);
+		this.noteLabelEl.toggleClass('sift-toggle--disabled', active === null);
+		this.noteEl.setAttr('title', active === null ? t('filter.thisNoteNone') : t('filter.thisNoteTooltip'));
 	}
 
 	private renderSubfolders(): void {
@@ -1359,6 +1403,7 @@ function cloneState(state: FilterBarState): FilterBarState {
 		filters: { ...state.filters, excludedFolders: [...state.filters.excludedFolders] },
 		sort: state.sort,
 		fuzzy: state.fuzzy,
+		activeNote: state.activeNote,
 		summary: state.summary === null ? null : { ...state.summary },
 	};
 }

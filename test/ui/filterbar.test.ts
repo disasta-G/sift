@@ -54,13 +54,21 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedFrom: null,
 		modifiedTo: null,
 		property: null,
+		note: null,
 		excludedFolders: [],
 		...overrides,
 	};
 }
 
 function baseState(overrides: Partial<FilterBarState> = {}): FilterBarState {
-	return { filters: baseFilters(), sort: 'relevance', fuzzy: false, summary: null, ...overrides };
+	return {
+		filters: baseFilters(),
+		sort: 'relevance',
+		fuzzy: false,
+		activeNote: 'Projekte/Offen.md',
+		summary: null,
+		...overrides,
+	};
 }
 
 function mount(state: FilterBarState = baseState()): Harness {
@@ -217,6 +225,64 @@ describe('folder input', () => {
 		await Promise.resolve();
 		await Promise.resolve();
 		expect(h.folderCalls()).toBe(1);
+	});
+});
+
+describe('this-note switch', () => {
+	function noteToggle(h: Harness): HTMLInputElement {
+		return input(h.bar, '.sift-toggle--note .sift-toggle__input');
+	}
+
+	it('confines the search to the note the overlay was called from', () => {
+		const h = mount();
+
+		noteToggle(h).checked = true;
+		noteToggle(h).dispatchEvent(new Event('change'));
+
+		expect(h.filters[0].note).toBe('Projekte/Offen.md');
+
+		noteToggle(h).checked = false;
+		noteToggle(h).dispatchEvent(new Event('change'));
+		expect(h.filters[1].note).toBeNull();
+	});
+
+	it('is unavailable, not absent, when no note is open', () => {
+		// A control that comes and goes is harder to find again than one that is
+		// visibly out of service.
+		const h = mount(baseState({ activeNote: null }));
+
+		expect(noteToggle(h).disabled).toBe(true);
+		expect(button(h.bar, '.sift-toggle--note').hasClass('sift-toggle--disabled')).toBe(true);
+	});
+
+	it('shows the filter it was given', () => {
+		const h = mount(baseState({ filters: baseFilters({ note: 'Projekte/Offen.md' }) }));
+		expect(noteToggle(h).checked).toBe(true);
+		expect(button(h.bar, '.sift-toggle--note').hasClass('sift-toggle--on')).toBe(true);
+	});
+});
+
+describe('bar order', () => {
+	it('reads folder, property, date, sort, then the switches on the right', () => {
+		const h = mount();
+		const order = Array.from(h.bar.el.children)
+			.map((el) => el.className)
+			.filter((cls) => !cls.includes('sift-filters__status'));
+
+		expect(order).toEqual([
+			'sift-chip sift-chip--path',
+			'sift-chip sift-chip--property',
+			'sift-filters__date',
+			'sift-sort',
+			'sift-filters__switches',
+		]);
+		// The three switches, in the group, in this order.
+		const switches = Array.from(
+			h.bar.el.querySelectorAll('.sift-filters__switches > .sift-toggle'),
+		).map((el) => el.className);
+		expect(switches[0]).toContain('sift-toggle--note');
+		expect(switches[1]).toContain('sift-toggle--subfolders');
+		expect(switches[2]).toContain('sift-toggle--similar');
 	});
 });
 

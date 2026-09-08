@@ -82,6 +82,8 @@ function open(options: { hits?: RawHit[]; settings?: Partial<SiftSettings>; quer
 			cachedRead: (): Promise<string> => Promise.resolve('Kaffee'),
 		},
 		workspace: {
+			// No note open in these fixtures; the "this note" filter is off.
+			getActiveFile: (): TFile | null => null,
 			getLeaf: (target: boolean | string) => {
 				const record: LeafRecord = { target, opened: [] };
 				leaves.push(record);
@@ -212,9 +214,34 @@ describe('the keep and dismiss controls', () => {
 
 		expect(h.cards()[1].hasClass('sift-card--kept')).toBe(true);
 		expect(h.keepButtons()[1].getAttribute('aria-pressed')).toBe('true');
+		expect(h.keepButtons()[1].hasClass('sift-card__action--on')).toBe(true);
+		// The icon changes shape, not only colour: on a theme whose muted text
+		// sits close to its accent, a recolour is not a difference the eye catches
+		// while scanning a list.
+		expect(h.keepButtons()[1].querySelector('svg')?.getAttribute('data-icon')).toBe('bookmark-check');
 		// The card's own click handler must not have fired underneath the button.
 		expect(h.leaves.length).toBe(0);
 		expect(h.titles()).toEqual(['Note 0', 'Note 1', 'Note 2']);
+	});
+
+	it('says that curation only shapes this run', async () => {
+		const h = open({ hits: hits(2) });
+		h.modal.setQuery('note');
+		await h.modal.runSearch(true);
+		const note = (): HTMLElement | null => h.modal.contentEl.querySelector('.sift-curate__note');
+		const group = (): HTMLElement | null => h.modal.contentEl.querySelector('.sift-curate');
+
+		// Nothing curated yet, so the line stays out of the way: a caption under
+		// every search would be noise and would have nothing to qualify.
+		expect(note()?.hasClass('sift-curate__note--visible')).toBe(false);
+
+		click(h.keepButtons()[0]);
+		await settle();
+
+		expect(group()?.hasClass('sift-curate--visible')).toBe(true);
+		// A bookmark icon does not say that nothing was written to the note.
+		expect(note()?.hasClass('sift-curate__note--visible')).toBe(true);
+		expect(note()?.textContent).toBe(t('curate.temporary'));
 	});
 
 	it('un-keeps on a second click', async () => {
@@ -226,6 +253,8 @@ describe('the keep and dismiss controls', () => {
 		click(h.keepButtons()[0]);
 		expect(h.cards()[0].hasClass('sift-card--kept')).toBe(false);
 		expect(h.keepButtons()[0].getAttribute('aria-pressed')).toBe('false');
+		expect(h.keepButtons()[0].hasClass('sift-card__action--on')).toBe(false);
+		expect(h.keepButtons()[0].querySelector('svg')?.getAttribute('data-icon')).toBe('bookmark');
 	});
 
 	it('hands the focus back to the search field when the clicked button is destroyed', async () => {

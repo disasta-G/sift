@@ -33,7 +33,7 @@ import type { App, ButtonComponent, Debouncer, SettingDefinitionItem } from 'obs
 import { dateFormatLocale, setLanguage, t } from './i18n/index';
 import type { TranslationKey } from './i18n/index';
 import type { IndexStats, LanguageSetting, SiftSettings, SiftTuning, SortKey, VaultPath } from './types';
-import { DEFAULT_DISMISS_HOTKEY, DEFAULT_KEEP_HOTKEY, canonicalHotkey } from './hotkey';
+import { DEFAULT_DISMISS_HOTKEY, DEFAULT_KEEP_HOTKEY, canonicalHotkey, hotkeyFromEvent } from './hotkey';
 import type { HotkeySetting } from './hotkey';
 import type SiftPlugin from './main';
 
@@ -353,9 +353,8 @@ export class SiftSettingTab extends PluginSettingTab {
 		this.renderRebuild(containerEl);
 	}
 
-	/** Flushes a pending folder, field or hotkey edit, so closing the tab is a commit. */
+	/** Flushes a pending folder or field edit, so closing the tab is a commit. */
 	override hide(): void {
-		this.sanitizeHotkeys();
 		this.commitLater.run();
 		super.hide();
 	}
@@ -444,15 +443,23 @@ export class SiftSettingTab extends PluginSettingTab {
 					step: MAX_RESULTS_STEP,
 				},
 			},
+			// Rendered rather than declared: a field that records a key press is
+			// not one of the control types the declarative renderer knows, and a
+			// plain text control there would be the box that could not be typed
+			// into. Both tabs call the same builder.
 			{
 				name: t('settings.keepHotkey.name'),
 				desc: t('settings.keepHotkey.desc'),
-				control: { type: 'text', key: 'keepHotkey', placeholder: DEFAULT_KEEP_HOTKEY },
+				render: (setting) => {
+					this.fillHotkey(setting, 'keepHotkey');
+				},
 			},
 			{
 				name: t('settings.dismissHotkey.name'),
 				desc: t('settings.dismissHotkey.desc'),
-				control: { type: 'text', key: 'dismissHotkey', placeholder: DEFAULT_DISMISS_HOTKEY },
+				render: (setting) => {
+					this.fillHotkey(setting, 'dismissHotkey');
+				},
 			},
 			{
 				type: 'group',
@@ -541,12 +548,6 @@ export class SiftSettingTab extends PluginSettingTab {
 				this.refresh();
 				return;
 			}
-			case 'keepHotkey':
-			case 'dismissHotkey':
-				// Deliberately accepts a value that does not parse yet; see
-				// {@link commitHotkey} for what a rejection did to the box.
-				this.commitHotkey(key, typeof value === 'string' ? value : '');
-				return;
 			case 'fuzzyByDefault':
 				this.settings.fuzzyByDefault = value === true;
 				void this.persist();
@@ -634,48 +635,74 @@ export class SiftSettingTab extends PluginSettingTab {
 	 * action.
 	 */
 	private renderHotkey(containerEl: HTMLElement, key: HotkeySetting): void {
-		new Setting(containerEl)
+		const setting = new Setting(containerEl)
 			.setName(t(`settings.${key}.name` as TranslationKey))
-			.setDesc(t(`settings.${key}.desc` as TranslationKey))
-			.setClass(key === 'keepHotkey' ? 'sift-setting-keep-hotkey' : 'sift-setting-dismiss-hotkey')
-			.addText((text) =>
-				text
-					.setPlaceholder(DEFAULT_SETTINGS[key])
-					.setValue(this.settings[key])
-					.onChange((value) => {
-						this.commitHotkey(key, value);
-					}),
-			);
+			.setDesc(t(`settings.${key}.desc` as TranslationKey));
+		this.fillHotkey(setting, key);
 	}
 
 	/**
-	 * Applies a typed combination, INCLUDING one that is not finished yet.
+	 * A field that RECORDS a combination: put the cursor in it, press the keys.
 	 *
-	 * `Alt+D` is typed one character at a time, and `A`, `Al`, `Alt` and `Alt+`
-	 * are all unusable as a hotkey. The first version of this refused them and
-	 * kept the stored value — which the declarative renderer then echoed back
-	 * into the box on the next keystroke, so the field snapped back to the old
-	 * combination and nothing could be typed at all.
+	 * It used to be an ordinary text box that read what was typed. Nobody types
+	 * `Alt+D` into a hotkey field - they press Alt and D, which inserts no
+	 * characters at all, so the box stayed empty and the setting looked broken.
+	 * This is how Obsidian's own hotkey editor behaves, and it is the only form
+	 * that works on macOS: with Option held down the layout turns the letter into
+	 * a symbol, and only the key's physical code still names it.
 	 *
-	 * So a half-written value is kept as it stands and only canonicalized once it
-	 * parses. That leaves an unusable string in the settings for as long as
-	 * someone is typing; both readers already answer for it — the overlay falls
-	 * back to the default binding, and {@link sanitizeHotkeys} replaces it when
-	 * the tab closes. Nothing else in the plugin reads these two fields.
+	 * Filled here rather than in {@link renderHotkey} so that the declarative tab
+	 * of Obsidian 1.13 and the imperative one of 1.8.7 share the implementation
+	 * instead of describing the same field twice.
 	 */
-	private commitHotkey(key: HotkeySetting, value: string): void {
-		this.settings[key] = canonicalHotkey(value) ?? value;
-		this.commitLater();
+	private fillHotkey(setting: Setting, key: HotkeySetting): void {
+		setting.setClass(key === 'keepHotkey' ? 'sift-setting-keep-hotkey' : 'sift-setting-dismiss-hotkey');
+		setting.addText((text) => {
+			text.setPlaceholder(t('settings.hotkey.press'));
+			text.setValue(canonicalHotkey(this.settings[key]) ?? DEFAULT_SETTINGS[key]);
+			// Read-only: every character in the box comes from a recorded press,
+			// so there is no half-written state to validate and nothing that can
+			// disagree with what is stored.
+			text.inputEl.readOnly = true;
+			text.inputEl.setAttr('spellcheck', 'false');
+			text.inputEl.addClass('sift-hotkey-input');
+			this.siftPlugin.registerDomEvent(text.inputEl, 'keydown', (evt: KeyboardEvent) => {
+				this.captureHotkey(key, evt, text.inputEl);
+			});
+		});
+		setting.addExtraButton((button) =>
+			button
+				.setIcon('rotate-ccw')
+				.setTooltip(t('settings.hotkey.reset'))
+				.onClick(() => {
+					this.settings[key] = DEFAULT_SETTINGS[key];
+					void this.persist();
+					this.refresh();
+				}),
+		);
 	}
 
 	/**
-	 * Replaces a half-written combination with the default. Runs when the tab
-	 * closes, which is the point at which "still typing" stops being true.
+	 * Turns one key press into the stored combination.
+	 *
+	 * Tab is left alone so the field can still be left with the keyboard, and a
+	 * press that carries no modifier - or none but a modifier - is ignored while
+	 * the field goes on waiting. Everything else is swallowed: a recording field
+	 * that let Ctrl+P through would open the command palette instead.
 	 */
-	private sanitizeHotkeys(): void {
-		for (const key of ['keepHotkey', 'dismissHotkey'] as const) {
-			this.settings[key] = canonicalHotkey(this.settings[key]) ?? DEFAULT_SETTINGS[key];
+	private captureHotkey(key: HotkeySetting, evt: KeyboardEvent, input: HTMLInputElement): void {
+		if (evt.key === 'Tab') return;
+		evt.preventDefault();
+		evt.stopPropagation();
+		if (evt.key === 'Escape') {
+			input.blur();
+			return;
 		}
+		const combination = hotkeyFromEvent(evt);
+		if (combination === null) return;
+		this.settings[key] = combination;
+		input.value = combination;
+		void this.persist();
 	}
 
 	private renderCreatedField(containerEl: HTMLElement): void {
