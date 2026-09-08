@@ -678,6 +678,21 @@ export class SearchModal extends Modal {
 			this.setFiltersOpen(!this.filtersOpen);
 		});
 
+		// Sift's own close button, and the only one a phone gets: the platform
+		// draws its × absolutely in the very corner of the panel, which on a
+		// full-bleed layout is the status bar — visible, but the taps land on the
+		// system, not on the plugin. This one sits inside the header, below the
+		// safe-area inset, and the stylesheet hides the platform's there. On a
+		// desktop-width panel neither is shown; Escape closes, as it always has.
+		const close = header.createEl('button', {
+			cls: 'sift-close',
+			attr: { type: 'button', 'aria-label': t('search.close') },
+		});
+		setIcon(close.createSpan({ cls: 'sift-close__icon' }), 'x');
+		this.lifecycle.registerDomEvent(close, 'click', () => {
+			this.close();
+		});
+
 		this.lifecycle.registerDomEvent(input, 'input', () => {
 			this.query = input.value;
 			void this.runSearch();

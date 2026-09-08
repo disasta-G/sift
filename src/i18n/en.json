@@ -4,6 +4,7 @@
 
 	"search.placeholder": "Search your vault",
 	"search.label": "Search query",
+	"search.close": "Close the search",
 	"search.clear": "Clear the query",
 	"search.count": "{n} results · {ms} ms",
 	"search.countOne": "1 result · {ms} ms",

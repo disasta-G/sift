@@ -56,8 +56,13 @@ rather than the light mockup's visible edge, so both themes agree.
 	overflow: hidden;
 }
 
-/* The header carries the whole layout; the mockup has no close button. */
-.sift-modal .modal-close-button {
+/* The header carries the whole layout; the mockup has no close button. The
+   container is named too: on a phone the platform draws its × absolutely in the
+   panel's top right corner, which a full-bleed modal shares with the status bar,
+   so it reads as a control and answers no tap. `.sift-close` in the header
+   replaces it there. */
+.sift-modal .modal-close-button,
+.sift-modal-container .modal-close-button {
 	display: none;
 }
 
@@ -123,6 +128,43 @@ rather than the light mockup's visible edge, so both themes agree.
 	line-height: 1.5;
 	white-space: nowrap;
 	color: var(--text-faint);
+}
+
+/* Sift's own close button. Narrow viewports only, like the filter button: with
+   room for the panel to float, Escape and a click outside it are the ways out,
+   and the mockup draws neither control. */
+.sift-close {
+	display: none;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border: none;
+	border-radius: 6px;
+	background-color: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-close__icon {
+	--icon-size: 20px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.sift-close:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.sift-close:focus-visible {
+	color: var(--text-normal);
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
 }
 
 /* The header's filter button. It exists only on a narrow viewport: on a panel
@@ -1059,7 +1101,8 @@ rather than the light mockup's visible edge, so both themes agree.
 		font-size: 19px;
 	}
 
-	.sift-filter-toggle {
+	.sift-filter-toggle,
+	.sift-close {
 		display: flex;
 	}
 

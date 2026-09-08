@@ -4,6 +4,7 @@
 
 	"search.placeholder": "Vault durchsuchen",
 	"search.label": "Suchbegriff",
+	"search.close": "Suche schliessen",
 	"search.clear": "Eingabe löschen",
 	"search.count": "{n} Treffer · {ms} ms",
 	"search.countOne": "1 Treffer · {ms} ms",

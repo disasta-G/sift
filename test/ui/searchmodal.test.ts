@@ -809,6 +809,19 @@ describe('filter bar folding', () => {
 		return el;
 	}
 
+	it('closes the overlay from the header button, which the phone layout needs', () => {
+		const h = open();
+		const close = h.modal.contentEl.querySelector('.sift-close');
+		if (!(close instanceof HTMLButtonElement)) throw new Error('no close button');
+		expect(close.getAttribute('aria-label')).toBe(t('search.close'));
+
+		close.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+		// The platform's own × is hidden on that width, so this is the only way
+		// out of a full-screen overlay without a keyboard.
+		expect(h.modal.contentEl.querySelector('.sift-input')).toBeNull();
+	});
+
 	it('starts folded, unfolds on the button and points at the bar it controls', () => {
 		const h = open();
 
