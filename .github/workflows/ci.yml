@@ -41,7 +41,10 @@ jobs:
         run: npm ci
 
       - name: Scope guard
-        run: npm run guard:release
+        # Without --release: the release variant also checks main.js, which the
+        # build three steps down has not produced yet. The bundle is guarded by
+        # the last step, after the build, which is the only point it exists at.
+        run: npm run guard
 
       - name: Typecheck
         run: npm run typecheck
