@@ -42,6 +42,7 @@ function makeFile(overrides: Partial<IndexedFile> = {}): IndexedFile {
 		createdAt: 1_700_000_000_000,
 		modifiedAt: 1_700_000_100_000,
 		createdSource: 'ctime',
+		properties: {},
 		size: 17,
 		indexedMtime: 1_700_000_100_000,
 	};

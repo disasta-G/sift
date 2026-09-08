@@ -58,6 +58,7 @@
  */
 
 import { AbstractInputSuggest, Component, Scope, normalizePath, setIcon } from 'obsidian';
+import { stripFold } from '../index/Normalizer';
 import type { App, TFolder } from 'obsidian';
 import { dateFormatLocale, t } from '../i18n/index';
 import type { TranslationKey } from '../i18n/index';
@@ -65,6 +66,7 @@ import type {
 	FilterBarCallbacks,
 	FilterBarState,
 	Millis,
+	PropertyFilter,
 	SearchFilters,
 	SearchSummary,
 	SortKey,
@@ -74,11 +76,22 @@ import type {
 /** U+00D7 MULTIPLICATION SIGN, per the mockup — not the letter x. */
 const REMOVE_GLYPH = '×';
 
-/** The quick picks the plan asks for on the created-date chip. */
-export type QuickPickKind = 'week' | 'month' | 'year' | 'any';
+/** Separator between the two boxes of the property chip. */
+const PROPERTY_EQUALS = '=';
 
-/** How far back each quick pick reaches, in days. `'any'` has no bound. */
+/** The quick picks on the created-date chip. */
+export type QuickPickKind = 'today' | 'week' | 'month' | 'year' | 'any';
+
+/**
+ * How far back each quick pick reaches, in days. `'any'` has no bound.
+ *
+ * `today` is 0: the lower edge is this morning's midnight, so the pick covers
+ * today alone. It is the one range the calendar can no longer produce on its
+ * own — a second click on the day that is already the start keeps the range
+ * open rather than closing it on that day, see `pickDay`.
+ */
 const QUICK_PICK_DAYS: Readonly<Record<Exclude<QuickPickKind, 'any'>, number>> = {
+	today: 0,
 	week: 7,
 	month: 30,
 	year: 365,
@@ -314,6 +327,12 @@ export function placePopover(geometry: PopoverGeometry): PopoverPlacement {
 	return { left: Math.round(left - geometry.anchorLeft), maxWidth: Math.round(available) };
 }
 
+/** Whether two property constraints say the same thing, `null` included. */
+function samePropertyFilter(a: PropertyFilter | null, b: PropertyFilter | null): boolean {
+	if (a === null || b === null) return a === b;
+	return a.key === b.key && a.value === b.value;
+}
+
 /** Folder suggestions for the path chip, backed by the vault's own folder list. */
 class FolderSuggest extends AbstractInputSuggest<TFolder> {
 	private readonly onPick: (path: VaultPath) => void;
@@ -353,6 +372,47 @@ class FolderSuggest extends AbstractInputSuggest<TFolder> {
 	}
 }
 
+/**
+ * Completions for the property chip. One class for both boxes: the key box asks
+ * for property names, the value box for the values recorded under the key that
+ * is currently in the chip, and both come from the same callback.
+ */
+class PropertySuggest extends AbstractInputSuggest<string> {
+	private readonly source: (query: string) => readonly string[];
+	private readonly onPick: (value: string) => void;
+
+	constructor(
+		app: App,
+		input: HTMLInputElement,
+		source: (query: string) => readonly string[],
+		onPick: (value: string) => void,
+	) {
+		super(app, input);
+		this.source = source;
+		this.onPick = onPick;
+	}
+
+	protected getSuggestions(query: string): string[] {
+		return this.source(query).slice(0, this.limit);
+	}
+
+	renderSuggestion(value: string, el: HTMLElement): void {
+		el.setText(value);
+	}
+
+	override selectSuggestion(value: string): void {
+		this.setValue(value);
+		this.onPick(value);
+		this.close();
+	}
+
+	/** See `FolderSuggest.dispose`. */
+	dispose(): void {
+		this.close();
+		(this as unknown as { destroy?: () => void }).destroy?.();
+	}
+}
+
 export class FilterBar {
 	readonly el: HTMLElement;
 
@@ -363,10 +423,16 @@ export class FilterBar {
 	private readonly menuScope: Scope;
 	private readonly now: () => Millis;
 	private readonly suggest: FolderSuggest;
+	private readonly propertyKeySuggest: PropertySuggest;
+	private readonly propertyValueSuggest: PropertySuggest;
 
 	private readonly pathChipEl: HTMLElement;
 	private readonly pathInputEl: HTMLInputElement;
 	private readonly pathRemoveEl: HTMLElement;
+	private readonly propertyChipEl: HTMLElement;
+	private readonly propertyKeyEl: HTMLInputElement;
+	private readonly propertyValueEl: HTMLInputElement;
+	private readonly propertyRemoveEl: HTMLElement;
 	private readonly subfoldersEl: HTMLInputElement;
 	private readonly subfoldersLabelEl: HTMLElement;
 	private readonly fuzzyEl: HTMLInputElement;
@@ -463,6 +529,74 @@ export class FilterBar {
 			this.commitFolder('');
 		});
 
+		/* --- property chip -------------------------------------------------- */
+		// Two boxes in one chip: the property name, and the value it has to carry.
+		// An empty value box means "the note has this property at all", which is
+		// the question a property-driven vault asks most often.
+		this.propertyChipEl = this.el.createDiv({ cls: 'sift-chip sift-chip--property' });
+		const propertyIcon = this.propertyChipEl.createSpan({ cls: 'sift-chip__icon' });
+		setIcon(propertyIcon, 'list');
+		this.propertyKeyEl = this.propertyChipEl.createEl('input', {
+			cls: 'sift-chip__input sift-chip__input--key',
+			type: 'text',
+			attr: {
+				'aria-label': t('filter.property'),
+				placeholder: t('filter.propertyAny'),
+				spellcheck: 'false',
+				enterkeyhint: 'done',
+			},
+		});
+		this.propertyChipEl.createSpan({ cls: 'sift-chip__equals', text: PROPERTY_EQUALS });
+		this.propertyValueEl = this.propertyChipEl.createEl('input', {
+			cls: 'sift-chip__input sift-chip__input--value',
+			type: 'text',
+			attr: {
+				'aria-label': t('filter.propertyValue'),
+				placeholder: t('filter.propertyValueAny'),
+				spellcheck: 'false',
+				enterkeyhint: 'done',
+			},
+		});
+		this.propertyRemoveEl = this.propertyChipEl.createEl('button', {
+			cls: 'sift-chip__remove',
+			text: REMOVE_GLYPH,
+			attr: { type: 'button', 'aria-label': t('filter.remove') },
+		});
+
+		this.propertyKeySuggest = new PropertySuggest(
+			app,
+			this.propertyKeyEl,
+			(query) => this.callbacks.propertySuggestions(null, query),
+			() => {
+				this.commitProperty();
+				this.propertyValueEl.focus();
+			},
+		);
+		this.propertyValueSuggest = new PropertySuggest(
+			app,
+			this.propertyValueEl,
+			(query) => this.callbacks.propertySuggestions(this.propertyKey(), query),
+			() => {
+				this.commitProperty();
+			},
+		);
+		for (const box of [this.propertyKeyEl, this.propertyValueEl]) {
+			this.lifecycle.registerDomEvent(box, 'change', () => {
+				this.commitProperty();
+			});
+			this.lifecycle.registerDomEvent(box, 'keydown', (evt: KeyboardEvent) => {
+				if (evt.key !== 'Enter') return;
+				evt.preventDefault();
+				this.commitProperty();
+			});
+		}
+		this.lifecycle.registerDomEvent(this.propertyRemoveEl, 'click', (evt: MouseEvent) => {
+			evt.preventDefault();
+			this.propertyKeyEl.value = '';
+			this.propertyValueEl.value = '';
+			this.commitProperty();
+		});
+
 		/* --- toggles -------------------------------------------------------- */
 		const subfolders = this.buildToggle('filter.includeSubfolders', 'sift-toggle--subfolders');
 		this.subfoldersEl = subfolders.input;
@@ -503,6 +637,7 @@ export class FilterBar {
 			attr: { role: 'dialog', 'aria-label': t('filter.created') },
 		});
 		const picks = this.dateMenuEl.createDiv({ cls: 'sift-date-menu__picks' });
+		this.buildQuickPick(picks, 'today', 'filter.quickToday');
 		this.buildQuickPick(picks, 'week', 'filter.quick7Days');
 		this.buildQuickPick(picks, 'month', 'filter.quick30Days');
 		this.buildQuickPick(picks, 'year', 'filter.quickYear');
@@ -654,6 +789,8 @@ export class FilterBar {
 	destroy(): void {
 		this.toggleDateMenu(false);
 		this.suggest.dispose();
+		this.propertyKeySuggest.dispose();
+		this.propertyValueSuggest.dispose();
 		this.lifecycle.unload();
 		this.el.detach();
 	}
@@ -703,6 +840,31 @@ export class FilterBar {
 		this.emitFilters({ folder });
 	}
 
+	/** The key box, folded the way the index folded the note's own property names. */
+	private propertyKey(): string | null {
+		const key = stripFold(this.propertyKeyEl.value).trim();
+		return key.length === 0 ? null : key;
+	}
+
+	/**
+	 * Reads both boxes and emits the constraint they describe.
+	 *
+	 * A value without a key is not a filter — there is nothing to compare it
+	 * against — so it stays in the box unapplied: typing the value first is a
+	 * normal order, and throwing away what was typed would be the worse answer.
+	 */
+	private commitProperty(): void {
+		const key = this.propertyKey();
+		const value = stripFold(this.propertyValueEl.value).trim();
+		const next: PropertyFilter | null =
+			key === null ? null : { key, value: value.length === 0 ? null : value };
+		if (samePropertyFilter(this.state.filters.property, next)) {
+			this.renderProperty();
+			return;
+		}
+		this.emitFilters({ property: next });
+	}
+
 	/**
 	 * A quick pick fills the same two fields the calendar does, so the calendar
 	 * below it shows the range that was just chosen. That is also why it no longer
@@ -720,10 +882,23 @@ export class FilterBar {
 	 * start and leaves the end open, the second closes the range, and a click
 	 * before the current start restarts the range there rather than producing a
 	 * backwards one.
+	 *
+	 * A second click on the day that is already the start is the exception. It
+	 * used to close the range on that one day, which is the wrong reading twice
+	 * over: one date in a date range means "from here on", which is what the
+	 * chip's own label ("Created 10.09.2026 – today") already says after the
+	 * first click, and on a touch screen the second click is often not a decision
+	 * at all but the same tap arriving twice. So the start stays pending and the
+	 * range stays open. A single day is what the "Today" quick pick is for.
 	 */
 	private pickDay(day: Millis): void {
 		const start = this.pendingStart;
 		this.hoverDay = null;
+		if (start === day) {
+			this.cursorDay = day;
+			this.paintDays();
+			return;
+		}
 		if (start === null || day < start) {
 			this.pendingStart = day;
 			this.cursorDay = day;
@@ -855,6 +1030,7 @@ export class FilterBar {
 
 	private renderControls(): void {
 		this.renderPath();
+		this.renderProperty();
 		this.renderSubfolders();
 		this.applyFuzzy();
 		this.renderDate();
@@ -867,6 +1043,22 @@ export class FilterBar {
 		if (this.pathInputEl.value !== value) this.pathInputEl.value = value;
 		this.pathChipEl.toggleClass('sift-chip--active', folder !== null);
 		this.pathRemoveEl.toggleClass('sift-chip__remove--visible', folder !== null);
+	}
+
+	private renderProperty(): void {
+		const property = this.state.filters.property;
+		// The boxes are written only where they disagree with the state, so a
+		// half-typed key survives a re-render caused by another control.
+		if (property !== null) {
+			const value = property.value ?? '';
+			if (this.propertyKeyEl.value !== property.key) this.propertyKeyEl.value = property.key;
+			if (this.propertyValueEl.value !== value) this.propertyValueEl.value = value;
+		}
+		// No `else` that empties the boxes: with a value typed and the key still
+		// missing, the constraint is legitimately null while the text has to stay
+		// where it is. The remove button clears both boxes itself.
+		this.propertyChipEl.toggleClass('sift-chip--active', property !== null);
+		this.propertyRemoveEl.toggleClass('sift-chip__remove--visible', property !== null);
 	}
 
 	private renderSubfolders(): void {

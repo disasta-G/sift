@@ -75,6 +75,7 @@ function filtersWith(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		createdTo: null,
 		modifiedFrom: null,
 		modifiedTo: null,
+		property: null,
 		excludedFolders: [],
 		...overrides,
 	};
@@ -120,6 +121,25 @@ const FOLDER_VAULT: Record<string, FakeFileSpec> = {
 	'Root.md': { content: note('Root'), ctime: BASE + 4 * DAY, mtime: BASE + 14 * DAY },
 };
 
+/**
+ * Notes with frontmatter, for the property filter. `Status` and `Fällig` are
+ * spelled with a capital and an umlaut on purpose: the index folds both the key
+ * and the value, and the filter has to travel folded to meet them.
+ */
+const PROPERTY_VAULT: Record<string, FakeFileSpec> = {
+	'Offen.md': {
+		content: `---\nStatus: Offen\nFällig: 2026-03-01\n---\n\nHier steht Kaffee im Text.\n`,
+		ctime: BASE,
+		mtime: BASE,
+	},
+	'Erledigt.md': {
+		content: `---\nstatus: erledigt\n---\n\nHier steht Kaffee im Text.\n`,
+		ctime: BASE,
+		mtime: BASE,
+	},
+	'Ohne.md': { content: note('Ohne'), ctime: BASE, mtime: BASE },
+};
+
 const ALPHA = 'Projekte/Alpha.md';
 const BETA = 'Projekte/2024/Beta.md';
 const GAMMA = 'Projekte2/Gamma.md';
@@ -138,19 +158,97 @@ const ALL = [ALPHA, BETA, GAMMA, DELTA, ROOT].sort();
 const VAULT_NOTES = 600;
 
 let small: Harness;
+let properties: Harness;
 let vault: LoadedVault;
 let fixture: Harness;
 
 beforeAll(async () => {
 	small = await buildHarness(FOLDER_VAULT);
+	properties = await buildHarness(PROPERTY_VAULT);
 	vault = loadVault(undefined, VAULT_NOTES);
 	fixture = await buildHarness(vault.files);
 }, 120_000);
 
 afterAll(() => {
 	small?.indexer.stop();
+	properties?.indexer.stop();
 	fixture?.indexer.stop();
 	vi.restoreAllMocks();
+});
+
+/* ========================================================================== */
+/* Property                                                                   */
+/* ========================================================================== */
+
+describe('Searcher — property filter', () => {
+	it('matches every note that carries the property, whatever its value', () => {
+		expect(passing(properties, filtersWith({ property: { key: 'status', value: null } }))).toEqual([
+			'Erledigt.md',
+			'Offen.md',
+		]);
+	});
+
+	it('narrows to a value, matching a fragment of the folded text', () => {
+		expect(passing(properties, filtersWith({ property: { key: 'status', value: 'offen' } }))).toEqual([
+			'Offen.md',
+		]);
+		// A fragment, not an equality: what the user types is more often part of
+		// the value than the whole of it.
+		expect(passing(properties, filtersWith({ property: { key: 'status', value: 'erled' } }))).toEqual([
+			'Erledigt.md',
+		]);
+	});
+
+	it('reads a key that was written with a capital and an umlaut', () => {
+		expect(passing(properties, filtersWith({ property: { key: 'fallig', value: null } }))).toEqual([
+			'Offen.md',
+		]);
+	});
+
+	it('matches nothing for a property no note has', () => {
+		expect(passing(properties, filtersWith({ property: { key: 'prioritat', value: null } }))).toEqual([]);
+	});
+
+	it('counts as an active filter, so it searches on its own', () => {
+		expect(hasActiveFilters(filtersWith({ property: { key: 'status', value: null } }))).toBe(true);
+		expect(hasActiveFilters(filtersWith())).toBe(false);
+	});
+});
+
+describe('Searcher — prop: operator', () => {
+	function paths(query: string): string[] {
+		return run(properties.searcher, query, filtersWith())
+			.map((hit) => hit.path)
+			.sort();
+	}
+
+	it('finds every note carrying the property', () => {
+		expect(paths('prop:status')).toEqual(['Erledigt.md', 'Offen.md']);
+	});
+
+	it('narrows to a value, folded on both sides', () => {
+		expect(paths('prop:status=offen')).toEqual(['Offen.md']);
+		// Typed with a capital, matched against the folded record.
+		expect(paths('prop:Status=Offen')).toEqual(['Offen.md']);
+	});
+
+	it('reports the match inside the frontmatter, so the excerpt can show it', () => {
+		const hits = run(properties.searcher, 'prop:status=offen', filtersWith());
+		expect(hits.length).toBe(1);
+		expect(hits[0].matches.length).toBe(1);
+		expect(hits[0].matches[0].field).toBe('frontmatter');
+		expect(hits[0].matches[0].end).toBeGreaterThan(hits[0].matches[0].start);
+	});
+
+	it('excludes with a leading minus, next to an ordinary term', () => {
+		// "Kaffee" is in all three notes; the exclusion removes the two that carry
+		// the property, which is the combination the chip cannot express.
+		expect(paths('Kaffee -prop:status')).toEqual(['Ohne.md']);
+	});
+
+	it('finds nothing for a property no note carries', () => {
+		expect(paths('prop:prioritat')).toEqual([]);
+	});
 });
 
 /* ========================================================================== */

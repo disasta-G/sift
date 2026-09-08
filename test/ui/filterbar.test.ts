@@ -53,6 +53,7 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		createdTo: null,
 		modifiedFrom: null,
 		modifiedTo: null,
+		property: null,
 		excludedFolders: [],
 		...overrides,
 	};
@@ -90,6 +91,11 @@ function mount(state: FilterBarState = baseState()): Harness {
 		onFiltersChange: (next) => filters.push(next),
 		onSortChange: (next) => sorts.push(next),
 		onFuzzyChange: (next) => fuzzies.push(next),
+		// A tiny stand-in vault: two properties, values only under `status`.
+		propertySuggestions: (key, query): readonly string[] => {
+			const pool = key === null ? ['due', 'status'] : key === 'status' ? ['erledigt', 'offen'] : [];
+			return pool.filter((entry) => entry.includes(query));
+		},
 	};
 
 	const bar = new FilterBar(app, host, state, callbacks, () => NOW);
@@ -214,6 +220,78 @@ describe('folder input', () => {
 	});
 });
 
+describe('property chip', () => {
+	function keyBox(h: Harness): HTMLInputElement {
+		return input(h.bar, '.sift-chip__input--key');
+	}
+
+	function valueBox(h: Harness): HTMLInputElement {
+		return input(h.bar, '.sift-chip__input--value');
+	}
+
+	function type(box: HTMLInputElement, value: string): void {
+		box.value = value;
+		box.dispatchEvent(new Event('change'));
+	}
+
+	it('filters on a property alone, which asks whether the note carries it', () => {
+		const h = mount();
+
+		type(keyBox(h), 'status');
+
+		expect(h.filters.length).toBe(1);
+		expect(h.filters[0].property).toEqual({ key: 'status', value: null });
+		expect(button(h.bar, '.sift-chip--property').hasClass('sift-chip--active')).toBe(true);
+	});
+
+	it('folds both boxes the way the index folded the note', () => {
+		const h = mount();
+
+		// Typed with a capital and an umlaut; the record holds the folded form, so
+		// the filter has to travel folded or it would match nothing.
+		type(keyBox(h), 'Fällig');
+		type(valueBox(h), 'Übermorgen');
+
+		expect(h.filters[h.filters.length - 1].property).toEqual({ key: 'fallig', value: 'ubermorgen' });
+	});
+
+	it('waits for the key when only a value has been typed', () => {
+		const h = mount();
+
+		type(valueBox(h), 'offen');
+
+		// Nothing to compare the value against yet, so no search is triggered - and
+		// the text stays in the box rather than being thrown away.
+		expect(h.filters.length).toBe(0);
+		expect(valueBox(h).value).toBe('offen');
+
+		type(keyBox(h), 'status');
+		expect(h.filters[0].property).toEqual({ key: 'status', value: 'offen' });
+	});
+
+	it('clears both boxes from the chip remove button', () => {
+		const h = mount();
+		type(keyBox(h), 'status');
+		type(valueBox(h), 'offen');
+
+		button(h.bar, '.sift-chip--property .sift-chip__remove').dispatchEvent(new MouseEvent('click'));
+
+		expect(h.filters[h.filters.length - 1].property).toBeNull();
+		expect(keyBox(h).value).toBe('');
+		expect(valueBox(h).value).toBe('');
+		expect(button(h.bar, '.sift-chip--property').hasClass('sift-chip--active')).toBe(false);
+	});
+
+	it('emits nothing when a re-entered value says the same thing', () => {
+		const h = mount();
+		type(keyBox(h), 'status');
+		expect(h.filters.length).toBe(1);
+
+		type(keyBox(h), 'status');
+		expect(h.filters.length).toBe(1);
+	});
+});
+
 describe('quick picks', () => {
 	it('computes both bounds against the injected clock, day-aligned and inclusive', () => {
 		expect(quickPickRange('week', NOW)).toEqual({
@@ -223,26 +301,37 @@ describe('quick picks', () => {
 		expect(quickPickRange('month', NOW).createdFrom).toBe(local(2026, 8, 8));
 		expect(quickPickRange('year', NOW).createdFrom).toBe(local(2025, 9, 7));
 		expect(quickPickRange('any', NOW)).toEqual({ createdFrom: null, createdTo: null });
+		// "Today" is the only pick whose two bounds sit on the same day. It is also
+		// the only way to ask for a single day at all: the calendar keeps a range
+		// open when the second click lands on the day that is already its start.
+		expect(quickPickRange('today', NOW)).toEqual({
+			createdFrom: local(2026, 9, 7),
+			createdTo: new Date(2026, 8, 7, 23, 59, 59, 999).getTime(),
+		});
 	});
 
 	it('applies each quick pick and clears both bounds from the chip remove button', () => {
 		const h = mount();
 		const items = h.bar.el.querySelectorAll('.sift-date-menu__item');
-		expect(items.length).toBe(4);
+		expect(items.length).toBe(5);
 
 		items[0].dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[0].createdFrom).toBe(local(2026, 8, 31));
+		expect(h.filters[0].createdFrom).toBe(local(2026, 9, 7));
 		expect(h.filters[0].createdTo).toBe(endOfDay(NOW));
 
 		items[1].dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[1].createdFrom).toBe(local(2026, 8, 8));
+		expect(h.filters[1].createdFrom).toBe(local(2026, 8, 31));
+		expect(h.filters[1].createdTo).toBe(endOfDay(NOW));
 
 		items[2].dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[2].createdFrom).toBe(local(2025, 9, 7));
+		expect(h.filters[2].createdFrom).toBe(local(2026, 8, 8));
+
+		items[3].dispatchEvent(new MouseEvent('click'));
+		expect(h.filters[3].createdFrom).toBe(local(2025, 9, 7));
 
 		button(h.bar, '.sift-chip__remove--date').dispatchEvent(new MouseEvent('click'));
-		expect(h.filters[3].createdFrom).toBeNull();
-		expect(h.filters[3].createdTo).toBeNull();
+		expect(h.filters[4].createdFrom).toBeNull();
+		expect(h.filters[4].createdTo).toBeNull();
 	});
 
 	it('leaves the popover open so the calendar shows what the quick pick selected', () => {
@@ -250,7 +339,11 @@ describe('quick picks', () => {
 		const wrap = button(h.bar, '.sift-filters__date');
 		openDates(h);
 
-		button(h.bar, '.sift-date-menu__item').dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		// The second item: "Today" now leads the list, and a range that is one day
+		// long says nothing about whether the view follows the start.
+		h.bar.el
+			.querySelectorAll('.sift-date-menu__item')[1]
+			.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 
 		// A pick whose result is invisible is a pick you have to reopen the
 		// popover to check, so the popover stays where it is.
@@ -481,6 +574,30 @@ describe('picking a range', () => {
 		// are the filter itself.
 		expect(lateOnTheDay > bound).toBe(false);
 		expect(justAfter > bound).toBe(true);
+	});
+
+	it('keeps the range open when the second click lands on the day that started it', () => {
+		const h = mount();
+		openDates(h);
+
+		clickDay(h.bar, 10);
+		clickDay(h.bar, 10);
+
+		// One emission, not two: the repeated click changes nothing, so the
+		// searcher is not asked to run again either. On a touch screen that second
+		// click is often the same tap arriving twice, and closing the range on it
+		// used to turn "from the 10th on" into "the 10th only".
+		expect(h.filters.length).toBe(1);
+		expect(h.filters[0].createdFrom).toBe(local(2026, 9, 10));
+		expect(h.filters[0].createdTo).toBeNull();
+		expect(daysWith(h.bar, 'sift-cal__day--start')).toEqual(['10']);
+		expect(daysWith(h.bar, 'sift-cal__day--end')).toEqual([]);
+
+		// The start is still pending, so a later day still closes the range.
+		clickDay(h.bar, 14);
+		expect(h.filters.length).toBe(2);
+		expect(h.filters[1].createdFrom).toBe(local(2026, 9, 10));
+		expect(h.filters[1].createdTo).toBe(new Date(2026, 8, 14, 23, 59, 59, 999).getTime());
 	});
 
 	it('restarts the range when the second click lands before the start', () => {

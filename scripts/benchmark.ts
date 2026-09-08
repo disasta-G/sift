@@ -257,6 +257,7 @@ const NO_FILTERS: SearchFilters = {
 	createdTo: null,
 	modifiedFrom: null,
 	modifiedTo: null,
+	property: null,
 	excludedFolders: [],
 };
 

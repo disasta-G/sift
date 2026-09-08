@@ -66,6 +66,7 @@ function noFilters(): SearchFilters {
 		createdTo: null,
 		modifiedFrom: null,
 		modifiedTo: null,
+		property: null,
 		excludedFolders: [],
 	};
 }

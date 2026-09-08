@@ -53,6 +53,7 @@
 import { Component, MarkdownView, Modal, Notice, Platform, normalizePath, setIcon } from 'obsidian';
 import type { App, Editor, EditorPosition, TFile, WorkspaceLeaf } from 'obsidian';
 import { dateFormatLocale, hasKey, t } from '../i18n/index';
+import { stripFold } from '../index/Normalizer';
 import type { TranslationKey } from '../i18n/index';
 import { parseQuery } from '../search/QueryParser';
 import { Ranker } from '../search/Ranker';
@@ -120,6 +121,12 @@ const ROW_HEIGHT_EPSILON = 2;
 /** Viewport height assumed when the list has not been laid out yet (test DOM, first paint). */
 const FALLBACK_VIEWPORT = 640;
 
+/** Property names or values offered at once. Beyond this the list is scrolled, not read. */
+const PROPERTY_SUGGESTION_LIMIT = 50;
+
+/** The filter bar's id, so the header's toggle can point `aria-controls` at it. */
+const FILTER_BAR_ID = 'sift-filter-bar';
+
 /** How often the modal re-checks a still-building index. */
 const INDEX_POLL_MS = 250;
 
@@ -183,6 +190,26 @@ export class SearchModal extends Modal {
 	/** True once "open all" has been pressed and is waiting for its answer. */
 	private confirmingOpen = false;
 
+	/**
+	 * Property names of the vault and the values recorded under each, built on
+	 * the first suggestion request and kept for as long as the overlay is open.
+	 *
+	 * It is a scan of every indexed record, which is too much to repeat on every
+	 * keystroke of the property chip and far too little to be worth persisting.
+	 * An index that changes while the overlay stands open therefore shows its new
+	 * properties on the next opening — suggestions only; what the filter actually
+	 * matches is always read from the live index.
+	 */
+	private propertyCatalogue: Map<string, Set<string>> | null = null;
+
+	/**
+	 * Whether the filter bar is unfolded. Only a narrow viewport reads this: the
+	 * stylesheet acts on `sift-filters--collapsed` inside its media query alone,
+	 * so on a desktop-width panel the bar stays where it always was and the
+	 * button that flips this is not rendered at all.
+	 */
+	private filtersOpen = false;
+
 	private searchSeq = 0;
 	private abort: AbortController | null = null;
 	private snippetAbort: AbortController | null = null;
@@ -199,6 +226,7 @@ export class SearchModal extends Modal {
 
 	private inputEl: HTMLInputElement | null = null;
 	private countEl: HTMLElement | null = null;
+	private filterToggleEl: HTMLButtonElement | null = null;
 	private resultsEl: HTMLElement | null = null;
 	private listEl: HTMLElement | null = null;
 	private topSpacerEl: HTMLElement | null = null;
@@ -224,6 +252,7 @@ export class SearchModal extends Modal {
 			createdTo: null,
 			modifiedFrom: null,
 			modifiedTo: null,
+			property: null,
 			excludedFolders: [...deps.settings.excludedFolders],
 		};
 	}
@@ -244,18 +273,24 @@ export class SearchModal extends Modal {
 			{
 				onFiltersChange: (filters) => {
 					this.filters = filters;
+					this.updateFilterToggle();
 					void this.runSearch(true);
 				},
 				onSortChange: (sort) => {
 					this.sort = sort;
+					this.updateFilterToggle();
 					void this.runSearch(true);
 				},
 				onFuzzyChange: (fuzzy) => {
 					this.fuzzy = fuzzy;
+					this.updateFilterToggle();
 					void this.runSearch(true);
 				},
+				propertySuggestions: (key, query) => this.propertySuggestions(key, query),
 			},
 		);
+		this.filterBar.el.id = FILTER_BAR_ID;
+		this.setFiltersOpen(false);
 		this.buildResults();
 		this.buildFooter();
 		this.registerKeys();
@@ -286,8 +321,11 @@ export class SearchModal extends Modal {
 		this.contentEl.removeClass('sift-modal__content');
 		this.modalEl.removeClass('sift-modal');
 		this.containerEl.removeClass('sift-modal-container');
+		this.propertyCatalogue = null;
 		this.inputEl = null;
 		this.countEl = null;
+		this.filterToggleEl = null;
+		this.filtersOpen = false;
 		this.resultsEl = null;
 		this.listEl = null;
 		this.topSpacerEl = null;
@@ -620,6 +658,26 @@ export class SearchModal extends Modal {
 		this.inputEl = input;
 		this.countEl = header.createDiv({ cls: 'sift-count' });
 
+		// Only a narrow viewport shows this; the stylesheet keeps it out of the
+		// layout otherwise. It is built unconditionally rather than behind
+		// `Platform.isPhone` so that a desktop window dragged narrow gets the same
+		// behaviour, and so the test suite can drive it without a platform stub.
+		const filterToggle = header.createEl('button', {
+			cls: 'sift-filter-toggle',
+			attr: {
+				type: 'button',
+				'aria-label': t('filter.show'),
+				'aria-expanded': 'false',
+				'aria-controls': FILTER_BAR_ID,
+			},
+		});
+		setIcon(filterToggle.createSpan({ cls: 'sift-filter-toggle__icon' }), 'sliders-horizontal');
+		filterToggle.createSpan({ cls: 'sift-filter-toggle__dot' });
+		this.filterToggleEl = filterToggle;
+		this.lifecycle.registerDomEvent(filterToggle, 'click', () => {
+			this.setFiltersOpen(!this.filtersOpen);
+		});
+
 		this.lifecycle.registerDomEvent(input, 'input', () => {
 			this.query = input.value;
 			void this.runSearch();
@@ -629,6 +687,97 @@ export class SearchModal extends Modal {
 			evt.preventDefault();
 			this.filterBar?.focusFirstControl();
 		});
+	}
+
+	/**
+	 * Completions for the property chip: property names while no key is set, and
+	 * the values recorded under that key once one is. Matched as a substring on
+	 * the folded text, so `stat` offers `status` and `off` offers `offen`.
+	 */
+	private propertySuggestions(key: string | null, query: string): readonly string[] {
+		const catalogue = this.propertyCatalogue ?? this.buildPropertyCatalogue();
+		const needle = stripFold(query).trim();
+		const pool = key === null ? catalogue.keys() : (catalogue.get(key) ?? new Set<string>()).values();
+		const out: string[] = [];
+		for (const candidate of pool) {
+			if (candidate.length === 0) continue;
+			if (needle.length > 0 && !candidate.includes(needle)) continue;
+			out.push(candidate);
+			if (out.length >= PROPERTY_SUGGESTION_LIMIT) break;
+		}
+		return out.sort((a, b) => a.localeCompare(b));
+	}
+
+	private buildPropertyCatalogue(): Map<string, Set<string>> {
+		const catalogue = new Map<string, Set<string>>();
+		for (const file of this.deps.indexer.allFiles()) {
+			for (const [key, value] of Object.entries(file.properties)) {
+				const values = catalogue.get(key) ?? new Set<string>();
+				values.add(value);
+				catalogue.set(key, values);
+			}
+		}
+		this.propertyCatalogue = catalogue;
+		return catalogue;
+	}
+
+	/* ---------------------------------------------------------------------- */
+	/* Filter bar folding (narrow viewports)                                  */
+	/* ---------------------------------------------------------------------- */
+
+	/**
+	 * Fold the filter bar away or unfold it.
+	 *
+	 * On a phone the bar is three rows of chips that sit between the query and
+	 * the results and never move: with the on-screen keyboard up, they left about
+	 * one card's worth of space. Folded away, the query owns the screen while you
+	 * type, and the filters are one tap away. Unfolding drops the keyboard,
+	 * because a filter you cannot see is not one you can set.
+	 *
+	 * The class does nothing above the media query's width, so this is a no-op on
+	 * a desktop-sized panel; the state is still tracked there so that a window
+	 * resized narrow finds the bar folded rather than in an undefined state.
+	 */
+	private setFiltersOpen(open: boolean): void {
+		this.filtersOpen = open;
+		const bar = this.filterBar?.el;
+		if (bar !== undefined) bar.toggleClass('sift-filters--collapsed', !open);
+		if (open) this.inputEl?.blur();
+		this.updateFilterToggle();
+	}
+
+	/** Label, expanded state and the dot that says a filter is narrowing the run. */
+	private updateFilterToggle(): void {
+		const button = this.filterToggleEl;
+		if (button === null) return;
+		button.setAttribute('aria-expanded', this.filtersOpen ? 'true' : 'false');
+		button.setAttribute('aria-label', this.filtersOpen ? t('filter.hide') : t('filter.show'));
+		button.toggleClass('sift-filter-toggle--open', this.filtersOpen);
+		button.toggleClass('sift-filter-toggle--active', this.filtersInUse());
+	}
+
+	/**
+	 * True when the run is narrowed by something other than the query itself.
+	 *
+	 * Folded away, the filter bar is invisible state, and invisible state that
+	 * silently drops results is the thing that makes a search feel broken. The
+	 * comparison is against the user's own defaults from the settings, not
+	 * against the plugin's, so a vault that always searches one folder does not
+	 * light the dot permanently.
+	 */
+	private filtersInUse(): boolean {
+		const settings = this.deps.settings;
+		return (
+			this.filters.folder !== null ||
+			this.filters.createdFrom !== null ||
+			this.filters.createdTo !== null ||
+			this.filters.modifiedFrom !== null ||
+			this.filters.modifiedTo !== null ||
+			this.filters.property !== null ||
+			this.filters.includeSubfolders !== settings.includeSubfoldersByDefault ||
+			this.fuzzy !== settings.fuzzyByDefault ||
+			this.sort !== settings.defaultSort
+		);
 	}
 
 	private buildResults(): void {

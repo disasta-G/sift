@@ -153,6 +153,7 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		createdTo: null,
 		modifiedFrom: null,
 		modifiedTo: null,
+		property: null,
 		excludedFolders: [],
 		...overrides,
 	};
@@ -172,6 +173,7 @@ function mountInModal(): { bar: FilterBar; modal: HTMLElement } {
 		onFiltersChange: () => undefined,
 		onSortChange: () => undefined,
 		onFuzzyChange: () => undefined,
+		propertySuggestions: (): readonly string[] => [],
 	};
 	const bar = new FilterBar(app, modal, baseState(), callbacks, () => Date.now());
 	return { bar, modal };

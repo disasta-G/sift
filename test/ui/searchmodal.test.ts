@@ -791,6 +791,64 @@ describe('openFileAtOffset', () => {
 /* 7. Lifecycle                                                               */
 /* -------------------------------------------------------------------------- */
 
+describe('filter bar folding', () => {
+	/**
+	 * The fold itself is a media query, so what is testable here is the state the
+	 * stylesheet acts on: the class on the bar, the button's expanded state, and
+	 * the dot that says a folded-away filter is narrowing the run.
+	 */
+	function toggle(h: ModalHarness): HTMLButtonElement {
+		const el = h.modal.contentEl.querySelector('.sift-filter-toggle');
+		if (!(el instanceof HTMLButtonElement)) throw new Error('no filter toggle');
+		return el;
+	}
+
+	function bar(h: ModalHarness): HTMLElement {
+		const el = h.modal.contentEl.querySelector('.sift-filters');
+		if (!(el instanceof HTMLElement)) throw new Error('no filter bar');
+		return el;
+	}
+
+	it('starts folded, unfolds on the button and points at the bar it controls', () => {
+		const h = open();
+
+		expect(bar(h).hasClass('sift-filters--collapsed')).toBe(true);
+		expect(toggle(h).getAttribute('aria-expanded')).toBe('false');
+		expect(toggle(h).getAttribute('aria-label')).toBe(t('filter.show'));
+		expect(toggle(h).getAttribute('aria-controls')).toBe(bar(h).id);
+		expect(bar(h).id.length).toBeGreaterThan(0);
+
+		toggle(h).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+
+		expect(bar(h).hasClass('sift-filters--collapsed')).toBe(false);
+		expect(toggle(h).getAttribute('aria-expanded')).toBe('true');
+		expect(toggle(h).getAttribute('aria-label')).toBe(t('filter.hide'));
+
+		toggle(h).dispatchEvent(new MouseEvent('click', { bubbles: true }));
+		expect(bar(h).hasClass('sift-filters--collapsed')).toBe(true);
+	});
+
+	it('marks the button while a filter narrows the run, against the user own defaults', () => {
+		const h = open();
+		expect(toggle(h).hasClass('sift-filter-toggle--active')).toBe(false);
+
+		const folder = h.modal.contentEl.querySelector('.sift-chip__input');
+		if (!(folder instanceof HTMLInputElement)) throw new Error('no folder box');
+		folder.value = 'Projekte';
+		folder.dispatchEvent(new Event('change'));
+
+		expect(toggle(h).hasClass('sift-filter-toggle--active')).toBe(true);
+	});
+
+	it('reads a vault that always sorts by date as unfiltered', () => {
+		// The dot compares against the settings, not against the plugin defaults:
+		// otherwise a user who set their own default sort would see it lit on every
+		// search and it would stop meaning anything.
+		const h = open({ settings: { defaultSort: 'modified-desc' } });
+		expect(toggle(h).hasClass('sift-filter-toggle--active')).toBe(false);
+	});
+});
+
 describe('lifecycle', () => {
 	it('leaves nothing behind after ten open/close cycles', async () => {
 		const base = createApp();

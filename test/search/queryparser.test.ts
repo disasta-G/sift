@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 
-import { addOrTerm, buildTerm, isFieldPrefix, parseQuery, stringifyQuery } from '../../src/search/QueryParser';
+import {
+	addOrTerm,
+	buildTerm,
+	isFieldPrefix,
+	parseQuery,
+	splitPropertyTerm,
+	stringifyQuery,
+} from '../../src/search/QueryParser';
 import type { QueryAst, QueryParseErrorCode, QueryTerm, SiftTuning, TermField } from '../../src/types';
 
 /**
@@ -126,6 +133,9 @@ const GRAMMAR: readonly GrammarCase[] = [
 	{ query: 'path:Projekte', must: [w('Projekte', 'path')] },
 	{ query: 'tag:hlks', must: [w('hlks', 'tag')] },
 	{ query: 'title:Küche', must: [w('Küche', 'title')] },
+	{ query: 'prop:status', must: [w('status', 'property')] },
+	{ query: 'prop:status=offen', must: [w('status=offen', 'property')] },
+	{ query: '-prop:status=offen', mustNot: [w('status=offen', 'property')], isEmpty: true },
 	{ query: 'path:"Alte Projekte"', must: [p('Alte Projekte', 'path')] },
 	{ query: '-path:"Alte Projekte"', mustNot: [p('Alte Projekte', 'path')], isEmpty: true },
 	{ query: '-tag:archiv', mustNot: [w('archiv', 'tag')], isEmpty: true },
@@ -516,12 +526,39 @@ describe('parseQuery — terms ordering', () => {
 });
 
 /* ========================================================================== */
+/* 5b. splitPropertyTerm                                                      */
+/* ========================================================================== */
+
+describe('splitPropertyTerm', () => {
+	it('reads a bare property as an existence check', () => {
+		expect(splitPropertyTerm('status')).toEqual({ key: 'status', value: null });
+	});
+
+	it('splits key and value at the first equals sign', () => {
+		expect(splitPropertyTerm('status=offen')).toEqual({ key: 'status', value: 'offen' });
+		// A value may carry an equals sign of its own; a property name may not, so
+		// the first one is the separator and every later one belongs to the value.
+		expect(splitPropertyTerm('formel=a=b')).toEqual({ key: 'formel', value: 'a=b' });
+	});
+
+	it('treats an empty half as absent rather than as an empty match', () => {
+		expect(splitPropertyTerm('status=')).toEqual({ key: 'status', value: null });
+		expect(splitPropertyTerm('=offen')).toEqual({ key: '', value: 'offen' });
+	});
+});
+
+/* ========================================================================== */
 /* 6. isFieldPrefix                                                           */
 /* ========================================================================== */
 
 describe('isFieldPrefix', () => {
 	const cases: readonly (readonly [string, TermField | null])[] = [
 		['path:', 'path'],
+		['prop:', 'property'],
+		['prop:status', 'property'],
+		['PROP:', 'property'],
+		// The field is `prop`, spelled the way it is typed. `property:` is not it.
+		['property:', null],
 		['path', 'path'],
 		['tag:', 'tag'],
 		['title:', 'title'],

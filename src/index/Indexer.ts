@@ -888,6 +888,7 @@ export class Indexer {
 			blockBreaks: doc.blockBreaks,
 			tags: doc.tags,
 			words: doc.words,
+			properties: doc.frontmatter,
 			createdAt: created.at,
 			modifiedAt: file.stat.mtime,
 			createdSource: created.source,

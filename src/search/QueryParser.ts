@@ -119,14 +119,31 @@ function makeError(code: QueryParseErrorCode, span: Span): QueryParseError {
 /* 3. Terms                                                                   */
 /* ========================================================================== */
 
-/** 'path' | 'tag' | 'title' for a recognised `field:` prefix, else null. */
+/** The recognised `field:` prefix of a token, else null. */
 export function isFieldPrefix(token: string): TermField | null {
 	const colon = token.indexOf(':');
 	const name = (colon < 0 ? token : token.slice(0, colon)).trim().toLowerCase();
 	if (name === 'path') return 'path';
+	if (name === 'prop') return 'property';
 	if (name === 'tag') return 'tag';
 	if (name === 'title') return 'title';
 	return null;
+}
+
+/**
+ * Splits the text of a `prop:` term into its two halves.
+ *
+ * `prop:status=offen` asks for a value, `prop:status` only for the property's
+ * presence — the same two questions the filter bar's property chip asks, so a
+ * query and a chip cannot mean different things. Everything after the FIRST `=`
+ * is the value, because a value may well contain one and a property name may
+ * not.
+ */
+export function splitPropertyTerm(text: string): { key: string; value: string | null } {
+	const equals = text.indexOf(PROPERTY_EQUALS);
+	if (equals < 0) return { key: text.trim(), value: null };
+	const value = text.slice(equals + 1).trim();
+	return { key: text.slice(0, equals).trim(), value: value.length === 0 ? null : value };
 }
 
 /**
@@ -147,6 +164,9 @@ function buildVariants(raw: string, normalized: string, maxVariants: number): st
 	}
 	return out;
 }
+
+/** Separator between a property name and the value it has to carry. */
+const PROPERTY_EQUALS = '=';
 
 /** Union of every variant's trigrams, first occurrence wins the order. */
 function collectTrigrams(variants: readonly string[]): string[] {
@@ -185,7 +205,10 @@ export function buildTerm(
 		// words), off for an exclusion (a near miss must not remove a file the
 		// user never typed), and off for a term too short to have a meaningful
 		// edit distance — at two characters every word is within distance 1.
-		fuzzyEligible: kind === 'word' && !negated && !short,
+		// Fuzzy is off for a property term too: the name of a property is either
+		// the one the vault uses or it is not, and a near miss there would answer
+		// a question nobody asked.
+		fuzzyEligible: kind === 'word' && !negated && !short && field !== 'property',
 		span: { start: span.start, end: span.end },
 	};
 }

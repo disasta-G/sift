@@ -25,13 +25,32 @@ The settings tab. It reports how many notes are indexed and how much memory the 
 - **Substring (infix) matching.** The index is built from trigrams, so a term matches anywhere inside a word. `maschine` finds `Espressomaschine`; `sonde` finds `Erdsondenfeld`. Prefix-only search engines cannot do this.
 - **Umlaut and ß tolerance in both directions.** `kueche` finds `Küche`, `küche` finds `Kueche`, `strasse` finds `Straße`. Such a hit is marked as an alias match and ranks just below a literal one.
 - **Operators.** Spaces mean AND, `"quoted text"` is an exact phrase, `-word` excludes, `a OR b` accepts either.
-- **Field prefixes.** `path:`, `tag:` and `title:` limit a single term to that field.
-- **Path and date filters.** Restrict a search to one folder, with or without its subfolders, and to a created or modified date range, with quick picks for the last 7 days, 30 days and year.
+- **Field prefixes.** `path:`, `tag:`, `title:` and `prop:` limit a single term to that field. `prop:status` finds every note that has a `status` property, `prop:status=offen` only those whose value contains `offen`, and `-prop:status` excludes them.
+- **Path, property and date filters.** Restrict a search to one folder, with or without its subfolders; to a note property, either by its presence alone or by a value; and to a created or modified date range, with quick picks for today, the last 7 days, 30 days and year. The property chip completes both the name and the value from the properties your vault actually uses.
 - **Ranked results.** Hits in the title, in frontmatter, in a tag and in a heading count for more than hits in the body; several matching terms close together count for more than the same terms far apart; whole-word matches get a bonus and recently edited notes a small one. The result is shown as a relevance value from 0 to 100. The order can be switched to created, modified, title or path at any time.
 - **Excerpts with highlighted hits.** Every card shows up to three excerpts of about 160 characters, cut from the original note text, so umlauts, casing and Markdown look exactly as you wrote them. The sentence around the hit is rendered in the normal text colour, its surroundings muted.
 - **Keyboard-first overlay.** Open, type, navigate and open a note without touching the mouse. Opening a hit places the cursor on the exact match position in the note.
 - **Optional typo tolerance.** The "Similar" toggle also accepts close spellings — `Espresomaschine` and `Kafeemaschine` still find the espresso machine note. It is off by default, never applies inside a phrase, and a card found this way says which word it actually matched.
 - **English and German interface.** The language follows the Obsidian interface language and can be set explicitly.
+
+## Properties
+
+Sift reads the properties (frontmatter) of every note and can filter on them.
+
+The property chip in the filter bar takes a name and, optionally, a value: with
+the value box empty it keeps every note that *carries* that property, which is
+the question a property-driven vault asks most often. Both boxes complete from
+what your own notes use. The same constraint is available in the query itself as
+`prop:name=value`, so it can be combined with the other operators — including
+`-prop:name`, which excludes.
+
+Names and values are matched the way the rest of Sift matches: case is ignored,
+umlauts fold both ways, and a value is matched as a fragment, so `prop:status=off`
+finds `Offen`. A list-valued property is matched item by item.
+
+Dates in a property are not calendar-aware here — the date filter reads the
+created and modified dates of the note. Which frontmatter field supplies the
+created date is a setting of its own (see below).
 
 ## How to use
 

@@ -34,7 +34,7 @@ import type {
  * Persisted-schema generation. Bumping it discards the IndexedDB content and
  * forces a full rebuild on the next start.
  */
-export const SIFT_SCHEMA_VERSION: SchemaVersion = 2;
+export const SIFT_SCHEMA_VERSION: SchemaVersion = 3;
 
 /**
  * Records written per transaction when the caller injects no batch size.
@@ -131,6 +131,20 @@ function isPackedWords(value: unknown): value is PackedWords {
 		&& typeof words.count === 'number';
 }
 
+/** A flat `Record<string, string>`, which is what a row's properties have to be. */
+function isStringRecord(value: unknown): boolean {
+	const record = asRecord(value);
+	if (record === null) {
+		return false;
+	}
+	for (const entry of Object.values(record)) {
+		if (typeof entry !== 'string') {
+			return false;
+		}
+	}
+	return true;
+}
+
 function isStringArray(value: unknown): boolean {
 	if (!Array.isArray(value)) {
 		return false;
@@ -191,6 +205,12 @@ function toIndexedFile(value: unknown): IndexedFile | null {
 		return null;
 	}
 	if (typeof file.size !== 'number' || typeof file.indexedMtime !== 'number') {
+		return null;
+	}
+	// Generation 3. A row from generation 2 carries no `properties`, and the
+	// property filter would read every one of those notes as having none —
+	// silently, and only for the files that came back from disk.
+	if (!isStringRecord(file.properties)) {
 		return null;
 	}
 	return value as IndexedFile;

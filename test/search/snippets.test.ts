@@ -86,6 +86,7 @@ function makeRecord(original: string, path = 'Notizen/Kueche.md', id = 1): Index
 		createdAt: CTIME,
 		modifiedAt: CTIME,
 		createdSource: 'ctime',
+		properties: {},
 		size: original.length,
 		indexedMtime: CTIME,
 	};

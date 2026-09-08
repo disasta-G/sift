@@ -91,6 +91,7 @@
 
 import { Indexer } from '../index/Indexer';
 import { extractWords, isWordBoundary, toOriginalOffset, wordAt } from '../index/Normalizer';
+import { splitPropertyTerm } from './QueryParser';
 import type {
 	FileId,
 	IndexedFile,
@@ -103,6 +104,7 @@ import type {
 	QueryAst,
 	QueryTerm,
 	RawHit,
+	PropertyFilter,
 	SearchFilters,
 	SearchOptions,
 	SiftTuning,
@@ -242,8 +244,26 @@ function intersectInto(working: Set<FileId>, other: ReadonlySet<FileId>): Set<Fi
 export function hasActiveFilters(filters: SearchFilters): boolean {
 	if (filters.createdFrom !== null || filters.createdTo !== null) return true;
 	if (filters.modifiedFrom !== null || filters.modifiedTo !== null) return true;
+	if (filters.property !== null) return true;
 	if (filters.folder === null) return false;
 	return trimSlashes(filters.folder.trim()).length > 0 || !filters.includeSubfolders;
+}
+
+/**
+ * Whether `file` carries the property the filter asks for.
+ *
+ * Both sides are already folded — the record's keys and values by the Indexer,
+ * the filter's by the filter bar — so this is a plain lookup and, when a value
+ * is given, a substring test. Substring rather than equality for two reasons: a
+ * list-valued property is stored as one joined string, where equality would
+ * match nothing; and a value the user types by hand is a fragment far more
+ * often than it is the whole entry.
+ */
+function hasProperty(file: IndexedFile, property: PropertyFilter): boolean {
+	const value = file.properties[property.key];
+	if (value === undefined) return false;
+	if (property.value === null) return true;
+	return value.includes(property.value);
 }
 
 /** `path` is `folder` itself or sits under it. Segment-aware, so `Projekte` never swallows `Projekte2`. */
@@ -604,6 +624,12 @@ export class Searcher {
 
 	/** Trigram intersection, or similarity-based expansion when `fuzzy`. Empty term.trigrams -> full candidate set (linear scan). */
 	candidates(term: QueryTerm, fuzzy: boolean): Set<FileId> {
+		// A property term is answered from the record's own property map, not from
+		// the body text, and its trigrams describe `status=offen` — a string that
+		// appears in no note, since the file spells it `status: offen`. Narrowing
+		// by them would return nothing at all, so this one field linear-scans, the
+		// way a term-less filter search already does.
+		if (term.field === 'property') return this.allIds();
 		if (term.trigrams.length === 0) return this.allIds();
 		const plan = this.planFor(term);
 		if (fuzzy && term.fuzzyEligible) return this.fuzzyCandidates(plan);
@@ -728,6 +754,9 @@ export class Searcher {
 			case 'path':
 				this.collectPlain(file.pathNormalized, 'path', plan, termIndex, out);
 				break;
+			case 'property':
+				this.collectProperty(term, file, termIndex, out);
+				break;
 			case 'tag':
 				this.collectTags(file, plan, termIndex, out);
 				break;
@@ -744,6 +773,43 @@ export class Searcher {
 			this.collectFuzzy(term, file, plan, termIndex, out);
 		}
 		return out;
+	}
+
+	/**
+	 * A `prop:` term, answered from the record's property map.
+	 *
+	 * The match it reports is the property's own name inside the frontmatter, so
+	 * the excerpt shows why the note is in the list and the Ranker weights the hit
+	 * like any other frontmatter hit. A property whose name cannot be located in
+	 * the text still matches — the map is the truth here — and reports the head of
+	 * the file rather than a span that would send the excerpt somewhere arbitrary.
+	 */
+	private collectProperty(term: QueryTerm, file: IndexedFile, termIndex: number, out: Match[]): void {
+		const { key, value } = splitPropertyTerm(term.normalized);
+		if (key.length === 0) return;
+		const stored = file.properties[key];
+		if (stored === undefined) return;
+		if (value !== null && !stored.includes(value)) return;
+
+		const span = file.frontmatterSpan;
+		const view = docView(file);
+		let start = span === null ? -1 : file.text.indexOf(key, span.start);
+		let end = start + key.length;
+		if (start < 0 || span === null || end > span.end) {
+			start = 0;
+			end = Math.min(1, file.text.length);
+		}
+		if (end <= start) return;
+		out.push({
+			start: toOriginalOffset(view, start),
+			end: toOriginalOffset(view, end),
+			field: 'frontmatter',
+			termIndex,
+			// The whole property name was matched, never a fragment of a longer
+			// word, and a map lookup is as exact as a match gets.
+			wholeWord: true,
+			quality: 'exact',
+		});
 	}
 
 	/** Literal occurrences in `file.text`, field decided per hit, offsets mapped to the original file. */
@@ -1002,6 +1068,7 @@ export class Searcher {
 		if (filters.createdTo !== null && file.createdAt > filters.createdTo) return false;
 		if (filters.modifiedFrom !== null && file.modifiedAt < filters.modifiedFrom) return false;
 		if (filters.modifiedTo !== null && file.modifiedAt > filters.modifiedTo) return false;
+		if (filters.property !== null && !hasProperty(file, filters.property)) return false;
 		return true;
 	}
 

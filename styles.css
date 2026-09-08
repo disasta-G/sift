@@ -125,6 +125,59 @@ rather than the light mockup's visible edge, so both themes agree.
 	color: var(--text-faint);
 }
 
+/* The header's filter button. It exists only on a narrow viewport: on a panel
+   wide enough for the bar itself, a control that folds it away is one more thing
+   to explain. `display: none` also keeps it out of the tab order there. */
+.sift-filter-toggle {
+	display: none;
+	position: relative;
+	align-items: center;
+	justify-content: center;
+	flex: 0 0 auto;
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background-color: transparent;
+	box-shadow: none;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-filter-toggle__icon {
+	--icon-size: 18px;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+}
+
+.sift-filter-toggle--open {
+	background-color: var(--background-secondary);
+	color: var(--text-normal);
+}
+
+/* Folded away, the filter bar is invisible state. The dot is what keeps a
+   narrowed run from reading as a broken search. */
+.sift-filter-toggle__dot {
+	display: none;
+	position: absolute;
+	top: 5px;
+	right: 5px;
+	width: 6px;
+	height: 6px;
+	border-radius: 50%;
+	background-color: var(--interactive-accent);
+}
+
+.sift-filter-toggle--active .sift-filter-toggle__dot {
+	display: block;
+}
+
+.sift-filter-toggle:focus-visible {
+	border-color: var(--background-modifier-border-focus);
+}
+
 /* ========================================================================== */
 /* 3. Filter bar                                                              */
 /* ========================================================================== */
@@ -225,6 +278,20 @@ rather than the light mockup's visible edge, so both themes agree.
 	font-size: 13px;
 	line-height: 1.5;
 	color: var(--text-normal);
+}
+
+/* Two boxes share the property chip, so neither may claim the 14ch a single
+   one gets: a key and a value side by side would push the sort control off a
+   phone-width bar. They still grow with what is typed via `min-width`. */
+.sift-chip__input--key,
+.sift-chip__input--value {
+	width: 9ch;
+	min-width: 5ch;
+}
+
+.sift-chip__equals {
+	flex: 0 0 auto;
+	color: var(--text-faint);
 }
 
 .sift-chip__input::placeholder {
@@ -963,28 +1030,85 @@ rather than the light mockup's visible edge, so both themes agree.
 /* ========================================================================== */
 
 @media (max-width: 800px) {
+	/* `dvh` after `vh`: the fallback keeps an old webview working, and where the
+	   dynamic unit is understood the panel follows the browser chrome and the
+	   on-screen keyboard instead of standing 100vh tall behind them. */
 	.sift-modal {
 		width: 100vw;
 		max-width: 100vw;
 		height: 100vh;
 		max-height: 100vh;
+		height: 100dvh;
+		max-height: 100dvh;
 		border-radius: 0;
 	}
 
+	/* Full-bleed means the panel owns the notch and the home indicator too, so
+	   every outer edge carries its safe-area inset. Without the top one the query
+	   row sits under the status bar and behind the platform's own close button. */
 	.sift-header {
-		padding: 14px 16px 12px 16px;
+		padding: calc(14px + env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 12px
+			max(16px, env(safe-area-inset-left, 0px));
+		gap: 10px;
+	}
+
+	.sift-input,
+	.sift-input:focus,
+	.sift-input:hover,
+	.sift-input:active {
+		font-size: 19px;
+	}
+
+	.sift-filter-toggle {
+		display: flex;
+	}
+
+	/* Folded away by default on this width. The class is written by the modal and
+	   is deliberately inert outside this query: a desktop panel never hides its
+	   filter bar, however the state flag happens to stand. */
+	.sift-filters--collapsed {
+		display: none;
 	}
 
 	.sift-filters {
-		padding: 10px 16px;
+		padding: 10px max(16px, env(safe-area-inset-left, 0px)) 10px max(16px, env(safe-area-inset-right, 0px));
 	}
 
 	.sift-results {
-		padding: 12px 16px;
+		padding: 12px max(16px, env(safe-area-inset-right, 0px)) 12px max(16px, env(safe-area-inset-left, 0px));
+	}
+
+	/* A phone has no modifier keys to press, so the hint strip is dead weight in
+	   the one layout with the least room. The footer keeps only the curation
+	   controls and collapses to its border line while there are none. */
+	.sift-footer__hints {
+		display: none;
 	}
 
 	.sift-footer {
-		padding: 8px 16px;
+		padding: 0 max(16px, env(safe-area-inset-right, 0px)) env(safe-area-inset-bottom, 0px)
+			max(16px, env(safe-area-inset-left, 0px));
+	}
+
+	.sift-curate {
+		padding: 8px 0;
+	}
+
+	/* 48px of padding is a third of the screen once the keyboard is up. */
+	.sift-empty {
+		padding: 24px 4px;
+	}
+
+	.sift-empty__title {
+		font-size: 15px;
+	}
+
+	.sift-empty__body {
+		font-size: 13px;
+	}
+
+	.sift-empty__hint {
+		font-size: 12px;
 	}
 
 	/* Side by side the popover is about 380px wide, which does not fit a phone.
@@ -1016,7 +1140,71 @@ rather than the light mockup's visible edge, so both themes agree.
 }
 
 /* ========================================================================== */
-/* 9. Reduced motion                                                          */
+/* 9. Touch input                                                             */
+/* ========================================================================== */
+
+/* Sized for a finger rather than a pointer, and independent of the width: a
+   tablet gets the wide layout and still has no mouse. 16px on the folder box is
+   not a taste decision - iOS zooms the whole page into any field it focuses
+   below that size, and the panel never zooms back out. */
+@media (pointer: coarse) {
+	.sift-chip {
+		min-height: 38px;
+		padding: 8px 12px;
+	}
+
+	.sift-chip__input,
+	.sift-chip__input:focus,
+	.sift-chip__input:hover {
+		height: 22px;
+		font-size: 16px;
+	}
+
+	.sift-chip__remove {
+		min-width: 28px;
+		min-height: 28px;
+	}
+
+	.sift-toggle {
+		min-height: 38px;
+	}
+
+	.sift-sort {
+		min-height: 38px;
+	}
+
+	.sift-date-menu__item {
+		padding: 10px;
+	}
+
+	/* The grid, not the cell: the week is `repeat(7, 28px)`, so widening the day
+	   alone would overflow its own column. */
+	.sift-cal__week {
+		grid-template-columns: repeat(7, 36px);
+	}
+
+	.sift-cal__day,
+	.sift-cal__blank {
+		height: 34px;
+	}
+
+	.sift-cal__nav {
+		width: 32px;
+		height: 32px;
+	}
+
+	.sift-card {
+		padding: 14px 16px;
+	}
+
+	.sift-card__action {
+		width: 32px;
+		height: 32px;
+	}
+}
+
+/* ========================================================================== */
+/* 10. Reduced motion                                                         */
 /* ========================================================================== */
 
 /* The card itself is not listed any more: with the selection scale gone it has

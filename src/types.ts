@@ -75,13 +75,15 @@ export interface Span {
  * Persisted-schema generation. Bumping it discards the IndexedDB content and
  * forces a full rebuild.
  *
- * Generation 2 added {@link IndexedFile.blockBreaks}. The value that guards the
- * store is `SIFT_SCHEMA_VERSION` in `src/index/Store.ts`; it and this type move
- * together, and `Store.toIndexedFile` rejects a row that does not match. A
- * pre-generation-2 store is therefore discarded on load rather than served with
- * a field missing.
+ * Generation 2 added {@link IndexedFile.blockBreaks}, generation 3
+ * {@link IndexedFile.properties}. The value that guards the store is
+ * `SIFT_SCHEMA_VERSION` in `src/index/Store.ts`; it and this type move
+ * together, and `Store.toIndexedFile` rejects a row that does not match. An
+ * older store is therefore discarded on load rather than served with a field
+ * missing — the cost is one rebuild after the update, which the settings tab
+ * reports while it runs.
  */
-export type SchemaVersion = 2;
+export type SchemaVersion = 3;
 
 /* ========================================================================== */
 /* 2. Normalization                                                           */
@@ -219,6 +221,18 @@ export interface IndexedFile {
 	modifiedAt: Millis;
 	/** How `createdAt` was obtained; surfaced in the UI so a wrong frontmatter date is explainable. */
 	createdSource: CreatedSource;
+	/**
+	 * Frontmatter keys and their scalar values, both strip-folded — what
+	 * Obsidian's own interface calls the note's properties.
+	 *
+	 * Persisted since generation 3, because a property filter has to answer for
+	 * a file the current session has never opened. Values are folded so that a
+	 * chip reading `status = Offen` matches a note that spells it `offen`; the
+	 * key is folded for the same reason. A list-valued property is stored as its
+	 * items joined by `, `, which is what the fold of the source line already
+	 * produces.
+	 */
+	properties: Readonly<Record<string, string>>;
 	/** `file.stat.size` in bytes. */
 	size: number;
 	/** `file.stat.mtime` at index time. Staleness check on startup compares against this. */
@@ -292,7 +306,7 @@ export interface FileChange {
 export type TermKind = 'word' | 'phrase';
 
 /** Optional field restriction from a `path:` / `tag:` / `title:` prefix. */
-export type TermField = 'any' | 'path' | 'tag' | 'title';
+export type TermField = 'any' | 'path' | 'property' | 'tag' | 'title';
 
 /** One leaf of the query. */
 export interface QueryTerm {
@@ -435,8 +449,27 @@ export interface SearchFilters {
 	createdTo: Millis | null;
 	modifiedFrom: Millis | null;
 	modifiedTo: Millis | null;
+	/** One frontmatter property the note has to carry. `null` = no constraint. */
+	property: PropertyFilter | null;
 	/** From settings, not from the filter bar. Applied on top of everything else. */
 	excludedFolders: readonly VaultPath[];
+}
+
+/**
+ * A property constraint: the note has to carry `key`, and — when `value` is set
+ * — that key's value has to contain it.
+ *
+ * `value: null` is "the property exists at all", which is the question a
+ * property-driven vault asks most often ("everything that has a `due`"). The
+ * value match is a substring of the folded value rather than an equality, so
+ * `status = off` finds `Offen` and a list-valued `tags: [a, b]` is matched item
+ * by item without the filter having to know it was a list.
+ */
+export interface PropertyFilter {
+	/** Folded property name, without the trailing colon. Never empty. */
+	key: string;
+	/** Folded value fragment, or `null` for an existence check. Never empty when set. */
+	value: string | null;
 }
 
 /**
@@ -791,6 +824,15 @@ export interface FilterBarCallbacks {
 	onFiltersChange(filters: SearchFilters): void;
 	onSortChange(sort: SortKey): void;
 	onFuzzyChange(fuzzy: boolean): void;
+	/**
+	 * Completions for the property chip, read from the index: the property names
+	 * the vault actually uses when `key` is `null`, and the values recorded under
+	 * that key otherwise. Folded, distinct and already filtered by `query`.
+	 *
+	 * A callback rather than an index handle, so the filter bar keeps knowing
+	 * nothing about the Indexer and the suggestions stay testable without one.
+	 */
+	propertySuggestions(key: string | null, query: string): readonly string[];
 }
 
 /** Everything a result card needs. No card ever reaches back into the index. */
