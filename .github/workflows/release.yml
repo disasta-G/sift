@@ -1,0 +1,77 @@
+name: Release
+
+# Builds the release assets from the tagged sources and publishes them with
+# GitHub artifact attestations, so anyone can verify cryptographically that
+# main.js and styles.css came out of this repository at this commit rather
+# than off someone's laptop.
+#
+# Triggered by pushing a tag that matches the version in manifest.json, which
+# the directory requires to be identical - no `v` prefix.
+
+on:
+  push:
+    tags: ['[0-9]+.[0-9]+.[0-9]+']
+
+permissions:
+  contents: write # create the release and upload assets
+  id-token: write # mint the OIDC token the attestation is signed with
+  attestations: write # record the attestation
+
+jobs:
+  release:
+    name: Build, attest and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out the tag
+        uses: actions/checkout@v4
+        with:
+          # The guard reads the history, not just the tree.
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Refuse to release a tag that disagrees with the manifest
+        # The directory matches the tag against manifest.json exactly, and it
+        # fetches the assets from the release while reading the version from
+        # the repository. A mismatch produces an install that silently serves
+        # the wrong files, so it fails here instead.
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          manifest=$(node -p "require('./manifest.json').version")
+          if [ "$tag" != "$manifest" ]; then
+            echo "Tag $tag does not match manifest.json version $manifest." >&2
+            exit 1
+          fi
+          echo "Tag and manifest agree on $tag."
+
+      - name: Build
+        run: npm run build
+
+      - name: Guard the sources, the history and the bundle
+        run: npm run guard:release
+
+      - name: Attest the built assets
+        uses: actions/attest-build-provenance@v4
+        with:
+          subject-path: |
+            main.js
+            styles.css
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        # Three individual assets, never a zip: Obsidian downloads them by
+        # name. manifest.json is committed rather than built, so it carries no
+        # attestation - it is attached because the installer needs it.
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            main.js manifest.json styles.css \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
