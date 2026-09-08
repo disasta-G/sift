@@ -684,6 +684,16 @@ export interface SiftSettings {
 	includeSubfoldersByDefault: boolean;
 	/** Hard cap on rendered hits. Default 200 — the point at which the list virtualizes. */
 	maxResults: number;
+	/**
+	 * Combination that keeps the selected hit, e.g. `Mod+Shift+K`.
+	 *
+	 * Stored as one string in Obsidian's own modifier spelling, so a vault synced
+	 * between macOS and Windows carries one value rather than two. Parsed by
+	 * `src/ui/hotkey.ts`, which also decides what is refusable.
+	 */
+	keepHotkey: string;
+	/** Combination that dismisses the selected hit, e.g. `Mod+Shift+X`. */
+	dismissHotkey: string;
 	/** Rebuild the index from scratch on next load; set by the "Rebuild index" button, cleared by the Indexer. */
 	forceRebuild: boolean;
 }

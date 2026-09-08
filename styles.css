@@ -322,13 +322,42 @@ rather than the light mockup's visible edge, so both themes agree.
 	color: var(--text-normal);
 }
 
-/* Two boxes share the property chip, so neither may claim the 14ch a single
-   one gets: a key and a value side by side would push the sort control off a
-   phone-width bar. They still grow with what is typed via `min-width`. */
-.sift-chip__input--key,
-.sift-chip__input--value {
-	width: 9ch;
-	min-width: 5ch;
+/* The two chips that hold text boxes keep a FIXED width.
+   Sized in `ch` of the interface font, so the box holds a realistic folder or
+   property name in whatever font the theme sets, and generous enough that the
+   usual entry does not have to scroll inside the box.
+
+   Why fixed: everything in these chips used to change the chip's width - the
+   box grew with what was typed, and the × appeared when a value was set. So
+   using the filter moved the filter, and every chip to its right with it. The
+   width now stays put and the boxes divide it; only the modal's own width
+   changes anything. */
+.sift-chip--path,
+.sift-chip--property {
+	flex: 0 0 auto;
+	width: 26ch;
+}
+
+.sift-chip--property {
+	width: 38ch;
+}
+
+/* `flex` rather than a width: inside a chip of known width the boxes share what
+   is left over after the icon, the separator and the ×, so the × can appear
+   without pushing anything out of the chip. `min-width: 0` lets them actually
+   shrink to that share instead of standing on their content. */
+.sift-chip--path .sift-chip__input,
+.sift-chip--property .sift-chip__input {
+	flex: 1 1 0;
+	width: auto;
+	min-width: 0;
+}
+
+/* The name box takes the larger share of the two: a property is named before it
+   is given a value, its resting label is the longer one ("All properties"), and
+   a name is what the user reads back when checking what the chip is doing. */
+.sift-chip--property .sift-chip__input--key {
+	flex-grow: 1.4;
 }
 
 .sift-chip__equals {
@@ -1115,6 +1144,14 @@ rather than the light mockup's visible edge, so both themes agree.
 
 	.sift-filters {
 		padding: 10px max(16px, env(safe-area-inset-left, 0px)) 10px max(16px, env(safe-area-inset-right, 0px));
+	}
+
+	/* The screen decides the width here, not the text: a chip measured in `ch`
+	   would overflow a narrow phone or leave a gap on a wide one. */
+	.sift-chip--path,
+	.sift-chip--property {
+		flex: 1 1 100%;
+		width: 100%;
 	}
 
 	.sift-results {

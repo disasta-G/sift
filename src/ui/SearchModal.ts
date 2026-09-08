@@ -59,6 +59,8 @@ import { parseQuery } from '../search/QueryParser';
 import { Ranker } from '../search/Ranker';
 import { hasActiveFilters } from '../search/Searcher';
 import { FilterBar } from './FilterBar';
+import { DEFAULT_DISMISS_HOTKEY, DEFAULT_KEEP_HOTKEY, canonicalHotkey, formatHotkey, parseHotkey } from '../hotkey';
+import type { HotkeySetting, ParsedHotkey } from '../hotkey';
 import type { CountMode } from './FilterBar';
 import { CARD_ID_PREFIX, ResultCard } from './ResultCard';
 import type { Indexer } from '../index/Indexer';
@@ -823,8 +825,10 @@ export class SearchModal extends Modal {
 		this.buildHint(hints, t('footer.key.arrows'), t('footer.navigate'));
 		this.buildHint(hints, t('footer.key.enter'), t('footer.open'));
 		this.buildHint(hints, mac ? t('footer.key.modEnterMac') : t('footer.key.modEnter'), t('footer.newTab'));
-		this.buildHint(hints, mac ? t('footer.key.modShiftKMac') : t('footer.key.modShiftK'), t('footer.keep'));
-		this.buildHint(hints, mac ? t('footer.key.modShiftXMac') : t('footer.key.modShiftX'), t('footer.dismiss'));
+		// Read from the settings, not from the bundle: the two curation keys can be
+		// changed, and a hint that names the old combination is worse than none.
+		this.buildHint(hints, formatHotkey(this.hotkeyValue('keepHotkey'), mac), t('footer.keep'));
+		this.buildHint(hints, formatHotkey(this.hotkeyValue('dismissHotkey'), mac), t('footer.dismiss'));
 		this.buildHint(hints, mac ? t('footer.key.modShiftZMac') : t('footer.key.modShiftZ'), t('footer.undo'));
 		this.buildHint(hints, t('footer.key.esc'), t('footer.close'));
 		this.buildCurateGroup(footer);
@@ -978,13 +982,15 @@ export class SearchModal extends Modal {
 		// symbol, so `evt.key` is no longer the letter), which leaves Mod+Shift as
 		// the one combination that is both free of text-editing meaning and spelled
 		// the same on every keyboard.
-		this.scope.register(['Mod', 'Shift'], 'K', (evt) => {
+		const keep = this.hotkey('keepHotkey');
+		this.scope.register(keep.modifiers, keep.key, (evt) => {
 			if (this.filterBarHasFocus()) return true;
 			evt.preventDefault();
 			this.keepSelected();
 			return false;
 		});
-		this.scope.register(['Mod', 'Shift'], 'X', (evt) => {
+		const dismiss = this.hotkey('dismissHotkey');
+		this.scope.register(dismiss.modifiers, dismiss.key, (evt) => {
 			if (this.filterBarHasFocus()) return true;
 			evt.preventDefault();
 			this.dismissSelected();
@@ -999,6 +1005,24 @@ export class SearchModal extends Modal {
 			this.undoDismiss();
 			return false;
 		});
+	}
+
+	/**
+	 * The combination one of the two curation actions is bound to.
+	 *
+	 * The settings are validated on the way in, so an unreadable value here means
+	 * a hand-edited `data.json`. It falls back to the default rather than to
+	 * nothing: an action with no binding is a footer hint that lies.
+	 */
+	private hotkey(key: HotkeySetting): ParsedHotkey {
+		// The fallback is a literal in this file's own source; it parses.
+		return parseHotkey(this.hotkeyValue(key)) as ParsedHotkey;
+	}
+
+	/** The same combination as a string, for the footer hint. */
+	private hotkeyValue(key: HotkeySetting): string {
+		const fallback = key === 'keepHotkey' ? DEFAULT_KEEP_HOTKEY : DEFAULT_DISMISS_HOTKEY;
+		return canonicalHotkey(this.deps.settings[key]) ?? fallback;
 	}
 
 	/**

@@ -125,6 +125,11 @@
 	"index.rebuild.started": "Rebuilding the index…",
 	"index.rebuild.done": "Index rebuilt, {count} notes.",
 
+	"settings.keepHotkey.name": "Keep hotkey",
+	"settings.keepHotkey.desc": "Combination that keeps the selected result while the search is open. At least one modifier is required, and Ctrl stands for Cmd on macOS. A combination the query field uses for editing is taken over while the search is open.",
+	"settings.dismissHotkey.name": "Dismiss hotkey",
+	"settings.dismissHotkey.desc": "Combination that removes the selected result from this run. The same rules apply.",
+
 	"settings.heading.index": "Index",
 	"settings.defaultSort.name": "Default sort order",
 	"settings.defaultSort.desc": "Sort order a newly opened search starts with.",

@@ -791,6 +791,67 @@ describe('openFileAtOffset', () => {
 /* 7. Lifecycle                                                               */
 /* -------------------------------------------------------------------------- */
 
+describe('curation hotkeys', () => {
+	/** Every binding on the modal's scope, modifiers included. */
+	function bindings(h: ModalHarness): ScopeEntry[] {
+		return (h.modal.scope as unknown as { keys: ScopeEntry[] }).keys;
+	}
+
+	function bound(h: ModalHarness, modifiers: string[], key: string): ScopeEntry | undefined {
+		return bindings(h).find(
+			(entry) =>
+				entry.key === key &&
+				(entry.modifiers ?? []).length === modifiers.length &&
+				modifiers.every((modifier) => (entry.modifiers ?? []).includes(modifier)),
+		);
+	}
+
+	function hints(h: ModalHarness): string[] {
+		return Array.from(h.modal.contentEl.querySelectorAll('.sift-footer__hint')).map(
+			(el) => el.textContent ?? '',
+		);
+	}
+
+	it('binds the combinations from the settings, not the shipped defaults', () => {
+		const h = open({ settings: { keepHotkey: 'Mod+Alt+J', dismissHotkey: 'Alt+Shift+D' } });
+
+		expect(bound(h, ['Mod', 'Alt'], 'J')).toBeDefined();
+		expect(bound(h, ['Alt', 'Shift'], 'D')).toBeDefined();
+		// And the defaults are gone, or the old combination would keep working
+		// beside the new one.
+		expect(bound(h, ['Mod', 'Shift'], 'K')).toBeUndefined();
+		expect(bound(h, ['Mod', 'Shift'], 'X')).toBeUndefined();
+	});
+
+	it('names the configured combination in the footer', () => {
+		const h = open({ settings: { keepHotkey: 'Mod+Alt+J' } });
+		expect(hints(h).some((hint) => hint.includes('Ctrl Alt J'))).toBe(true);
+	});
+
+	it('falls back to the default when data.json holds something unusable', () => {
+		// The settings validate on the way in, so this is a hand-edited file. An
+		// action with no binding at all would make the footer hint a lie.
+		const h = open({ settings: { keepHotkey: 'not a hotkey' } });
+		expect(bound(h, ['Mod', 'Shift'], 'K')).toBeDefined();
+	});
+
+	it('keeps the keep and dismiss actions working through the new binding', async () => {
+		const h = open({
+			hits: [hit(0, { path: 'A.md', title: 'A' }), hit(1, { path: 'B.md', title: 'B' })],
+			settings: { dismissHotkey: 'Mod+Alt+D' },
+		});
+		h.modal.setQuery('a');
+		await h.modal.runSearch(true);
+		expect(h.titles()).toEqual(['A', 'B']);
+
+		const entry = bound(h, ['Mod', 'Alt'], 'D');
+		if (entry === undefined) throw new Error('dismiss is not bound');
+		entry.handler(new KeyboardEvent('keydown', { key: 'D' }));
+
+		expect(h.titles()).toEqual(['B']);
+	});
+});
+
 describe('filter bar folding', () => {
 	/**
 	 * The fold itself is a media query, so what is testable here is the state the

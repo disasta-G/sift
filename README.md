@@ -110,7 +110,29 @@ Each chip can be removed individually; nothing is remembered between two searche
 | Similar matching by default | Starts every search with the "Similar" toggle switched on. |
 | Include subfolders by default | Starts every search with the subfolders of the chosen folder included. |
 | Maximum results | Upper limit of results shown per search. |
+| Keep hotkey | Combination that marks the selected result as worth keeping. Default `Ctrl+Shift+K`. |
+| Dismiss hotkey | Combination that removes the selected result from the run. Default `Ctrl+Shift+X`. |
 | Rebuild index | Reads every note again. Needed after changing the excluded folders or the created date field. The settings tab also shows how many notes are indexed and roughly how much memory the index uses. |
+
+### Changing the two curation hotkeys
+
+They are typed into the settings as a combination, for example `Ctrl+Shift+K`,
+`Ctrl+J` or `Alt+Shift+D`. Case, spacing and the separator do not matter, and
+`Ctrl` is read as Cmd on macOS, so one setting is right on both platforms. The
+footer of the search overlay always names the combination that is actually
+bound.
+
+Two rules apply. At least one modifier is required — the query field owns every
+unmodified key. And `Ctrl+W`, `Ctrl+Q`, `Ctrl+N`, `Ctrl+T` and `Ctrl+R` are
+refused, because the desktop app answers those before the plugin sees them; a
+hotkey that closes the window is worse than one that does nothing. Everything
+else is free while the overlay is open, including combinations Obsidian uses
+elsewhere — but note that binding `Ctrl+C`, `Ctrl+V`, `Ctrl+X`, `Ctrl+A` or
+`Ctrl+Z` takes that gesture away from the query field for as long as the search
+is open.
+
+Sift still registers no hotkey of its own outside the overlay. The command
+"Sift: Open search" is bound under `Settings → Hotkeys`, like any other command.
 
 ## Privacy and network use
 

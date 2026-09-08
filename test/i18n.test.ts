@@ -173,7 +173,9 @@ describe('store policy', () => {
 /* -------------------------------------------------------------------------- */
 
 /** Proper nouns that stay capitalized inside a sentence. */
-const PROPER_NOUNS = new Set(['Sift']);
+// `Ctrl` and `Cmd` are the names of keys and are capitalized in every style
+// guide, including in the middle of a sentence.
+const PROPER_NOUNS = new Set(['Sift', 'Ctrl', 'Cmd']);
 
 /**
  * German function words. Title case capitalizes them, sentence case does not —

@@ -33,6 +33,8 @@ import type { App, ButtonComponent, Debouncer, SettingDefinitionItem } from 'obs
 import { dateFormatLocale, setLanguage, t } from './i18n/index';
 import type { TranslationKey } from './i18n/index';
 import type { IndexStats, LanguageSetting, SiftSettings, SiftTuning, SortKey, VaultPath } from './types';
+import { DEFAULT_DISMISS_HOTKEY, DEFAULT_KEEP_HOTKEY, canonicalHotkey } from './hotkey';
+import type { HotkeySetting } from './hotkey';
 import type SiftPlugin from './main';
 
 /* ========================================================================== */
@@ -68,6 +70,8 @@ export const DEFAULT_SETTINGS: SiftSettings = deepFreeze({
 	fuzzyByDefault: false,
 	includeSubfoldersByDefault: true,
 	maxResults: 200,
+	keepHotkey: DEFAULT_KEEP_HOTKEY,
+	dismissHotkey: DEFAULT_DISMISS_HOTKEY,
 	forceRebuild: false,
 } satisfies SiftSettings);
 
@@ -162,6 +166,8 @@ function freshDefaults(): SiftSettings {
 		fuzzyByDefault: DEFAULT_SETTINGS.fuzzyByDefault,
 		includeSubfoldersByDefault: DEFAULT_SETTINGS.includeSubfoldersByDefault,
 		maxResults: DEFAULT_SETTINGS.maxResults,
+		keepHotkey: DEFAULT_SETTINGS.keepHotkey,
+		dismissHotkey: DEFAULT_SETTINGS.dismissHotkey,
 		forceRebuild: DEFAULT_SETTINGS.forceRebuild,
 	};
 }
@@ -197,6 +203,11 @@ function migrateRecord(source: Record<string, unknown>): SiftSettings {
 			DEFAULT_SETTINGS.includeSubfoldersByDefault,
 		),
 		maxResults: migrateNumber(source.maxResults, DEFAULT_SETTINGS.maxResults, MAX_RESULTS_MIN, MAX_RESULTS_MAX),
+		// An unreadable combination falls back to the default rather than leaving
+		// the action unbound: a hotkey nobody can press is indistinguishable from
+		// a broken plugin.
+		keepHotkey: canonicalHotkey(source.keepHotkey) ?? DEFAULT_SETTINGS.keepHotkey,
+		dismissHotkey: canonicalHotkey(source.dismissHotkey) ?? DEFAULT_SETTINGS.dismissHotkey,
 		forceRebuild: migrateBoolean(source.forceRebuild, DEFAULT_SETTINGS.forceRebuild),
 	};
 }
@@ -334,6 +345,8 @@ export class SiftSettingTab extends PluginSettingTab {
 		this.renderFuzzyByDefault(containerEl);
 		this.renderIncludeSubfolders(containerEl);
 		this.renderMaxResults(containerEl);
+		this.renderHotkey(containerEl, 'keepHotkey');
+		this.renderHotkey(containerEl, 'dismissHotkey');
 
 		new Setting(containerEl).setName(t('settings.heading.index')).setHeading();
 		this.renderIndexStatus(containerEl);
@@ -431,6 +444,16 @@ export class SiftSettingTab extends PluginSettingTab {
 				},
 			},
 			{
+				name: t('settings.keepHotkey.name'),
+				desc: t('settings.keepHotkey.desc'),
+				control: { type: 'text', key: 'keepHotkey', placeholder: DEFAULT_KEEP_HOTKEY },
+			},
+			{
+				name: t('settings.dismissHotkey.name'),
+				desc: t('settings.dismissHotkey.desc'),
+				control: { type: 'text', key: 'dismissHotkey', placeholder: DEFAULT_DISMISS_HOTKEY },
+			},
+			{
 				type: 'group',
 				heading: t('settings.heading.index'),
 				// Rendered rather than declared: the status line is a reading of
@@ -517,6 +540,14 @@ export class SiftSettingTab extends PluginSettingTab {
 				this.refresh();
 				return;
 			}
+			case 'keepHotkey':
+			case 'dismissHotkey': {
+				const canonical = canonicalHotkey(value);
+				if (canonical === null) return;
+				this.settings[key] = canonical;
+				void this.persist();
+				return;
+			}
 			case 'fuzzyByDefault':
 				this.settings.fuzzyByDefault = value === true;
 				void this.persist();
@@ -590,6 +621,48 @@ export class SiftSettingTab extends PluginSettingTab {
 						void this.persist();
 					}),
 			);
+	}
+
+	/**
+	 * One of the two curation combinations.
+	 *
+	 * A text box rather than a recorder that captures the next key press: the
+	 * tab exists twice, once built by hand for Obsidian 1.8.7 and once declared
+	 * for 1.13.0 and newer, and the declarative form has no control that reads a
+	 * key press. A box both forms can render is worth more than a nicer widget on
+	 * one of them. What is typed is read generously and written back canonical;
+	 * something unreadable falls back to the default rather than unbinding the
+	 * action.
+	 */
+	private renderHotkey(containerEl: HTMLElement, key: HotkeySetting): void {
+		new Setting(containerEl)
+			.setName(t(`settings.${key}.name` as TranslationKey))
+			.setDesc(t(`settings.${key}.desc` as TranslationKey))
+			.setClass(key === 'keepHotkey' ? 'sift-setting-keep-hotkey' : 'sift-setting-dismiss-hotkey')
+			.addText((text) =>
+				text
+					.setPlaceholder(DEFAULT_SETTINGS[key])
+					.setValue(this.settings[key])
+					.onChange((value) => {
+						this.commitHotkey(key, value, text.inputEl);
+					}),
+			);
+	}
+
+	/**
+	 * Applies a typed combination.
+	 *
+	 * The box is only rewritten when the value it holds actually names a
+	 * different combination than what was typed, and never while the user is
+	 * still typing a valid prefix - rewriting `Mod+` into `Mod+Shift+K` under the
+	 * cursor would make the field impossible to edit.
+	 */
+	private commitHotkey(key: HotkeySetting, value: string, input: HTMLInputElement): void {
+		const canonical = canonicalHotkey(value);
+		if (canonical === null) return;
+		this.settings[key] = canonical;
+		void this.persist();
+		if (input.value.trim().toLowerCase() === canonical.toLowerCase()) input.value = canonical;
 	}
 
 	private renderCreatedField(containerEl: HTMLElement): void {

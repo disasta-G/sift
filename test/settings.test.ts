@@ -189,6 +189,8 @@ describe('DEFAULT_SETTINGS', () => {
 			fuzzyByDefault: false,
 			includeSubfoldersByDefault: true,
 			maxResults: 200,
+			keepHotkey: 'Mod+Shift+K',
+			dismissHotkey: 'Mod+Shift+X',
 			forceRebuild: false,
 		});
 	});
@@ -323,6 +325,8 @@ describe('migrateSettings', () => {
 			fuzzyByDefault: true,
 			includeSubfoldersByDefault: false,
 			maxResults: 500,
+			keepHotkey: 'Mod+Alt+K',
+			dismissHotkey: 'Mod+Alt+X',
 			forceRebuild: true,
 		};
 		expect(migrateSettings(stored)).toEqual(stored);
@@ -511,8 +515,8 @@ describe('SiftSettingTab.display', () => {
 		harness.tab.display();
 
 		const names = Array.from(harness.container.querySelectorAll('.setting-item-name'));
-		// Eight general rows, the index heading and its two rows.
-		expect(names.length).toBe(11);
+		// Ten general rows, the index heading and its two rows.
+		expect(names.length).toBe(13);
 		for (const name of names) {
 			const text = (name.textContent ?? '').trim();
 			expect(text.length, name.className).toBeGreaterThan(0);
@@ -545,8 +549,8 @@ describe('SiftSettingTab.display', () => {
 		harness.tab.display();
 		const items = Array.from(harness.container.querySelectorAll('.setting-item'));
 		const firstHeading = items.findIndex((item) => item.classList.contains('setting-item-heading'));
-		// The eight general rows come first; the index heading opens the second block.
-		expect(firstHeading).toBe(8);
+		// The ten general rows come first; the index heading opens the second block.
+		expect(firstHeading).toBe(10);
 	});
 
 	it('shows the current values in the controls', () => {
@@ -934,15 +938,17 @@ describe('getSettingDefinitions', () => {
 		const harness = createHarness();
 		const keys = controlKeys(harness.tab.getSettingDefinitions());
 
-		// The eight settings on the tab. `version` and `forceRebuild` are not on
+		// The ten settings on the tab. `version` and `forceRebuild` are not on
 		// it: one is the schema marker, the other is internal rebuild state.
 		expect([...keys].sort()).toEqual(
 			[
 				'createdField',
 				'defaultSort',
+				'dismissHotkey',
 				'excludedFolders',
 				'fuzzyByDefault',
 				'includeSubfoldersByDefault',
+				'keepHotkey',
 				'language',
 				'maxResults',
 				'snippetCount',

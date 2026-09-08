@@ -125,6 +125,11 @@
 	"index.rebuild.started": "Index wird neu aufgebaut…",
 	"index.rebuild.done": "Index neu aufgebaut, {count} Notizen.",
 
+	"settings.keepHotkey.name": "Tastenkürzel zum Merken",
+	"settings.keepHotkey.desc": "Kombination, die den gewählten Treffer merkt, solange die Suche offen ist. Mindestens eine Zusatztaste ist nötig; Ctrl bedeutet auf macOS Cmd. Ctrl+A, Ctrl+C, Ctrl+V, Ctrl+X und Ctrl+Z stehen dann im Suchfeld nicht mehr zum Bearbeiten zur Verfügung.",
+	"settings.dismissHotkey.name": "Tastenkürzel zum Verwerfen",
+	"settings.dismissHotkey.desc": "Kombination, die den gewählten Treffer aus diesem Durchgang entfernt. Es gelten dieselben Regeln.",
+
 	"settings.heading.index": "Index",
 	"settings.defaultSort.name": "Standardsortierung",
 	"settings.defaultSort.desc": "Sortierung, mit der eine neu geöffnete Suche startet.",
