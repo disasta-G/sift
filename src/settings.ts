@@ -353,8 +353,9 @@ export class SiftSettingTab extends PluginSettingTab {
 		this.renderRebuild(containerEl);
 	}
 
-	/** Flushes a pending folder or field edit, so closing the tab is a commit. */
+	/** Flushes a pending folder, field or hotkey edit, so closing the tab is a commit. */
 	override hide(): void {
+		this.sanitizeHotkeys();
 		this.commitLater.run();
 		super.hide();
 	}
@@ -541,13 +542,11 @@ export class SiftSettingTab extends PluginSettingTab {
 				return;
 			}
 			case 'keepHotkey':
-			case 'dismissHotkey': {
-				const canonical = canonicalHotkey(value);
-				if (canonical === null) return;
-				this.settings[key] = canonical;
-				void this.persist();
+			case 'dismissHotkey':
+				// Deliberately accepts a value that does not parse yet; see
+				// {@link commitHotkey} for what a rejection did to the box.
+				this.commitHotkey(key, typeof value === 'string' ? value : '');
 				return;
-			}
 			case 'fuzzyByDefault':
 				this.settings.fuzzyByDefault = value === true;
 				void this.persist();
@@ -644,25 +643,39 @@ export class SiftSettingTab extends PluginSettingTab {
 					.setPlaceholder(DEFAULT_SETTINGS[key])
 					.setValue(this.settings[key])
 					.onChange((value) => {
-						this.commitHotkey(key, value, text.inputEl);
+						this.commitHotkey(key, value);
 					}),
 			);
 	}
 
 	/**
-	 * Applies a typed combination.
+	 * Applies a typed combination, INCLUDING one that is not finished yet.
 	 *
-	 * The box is only rewritten when the value it holds actually names a
-	 * different combination than what was typed, and never while the user is
-	 * still typing a valid prefix - rewriting `Mod+` into `Mod+Shift+K` under the
-	 * cursor would make the field impossible to edit.
+	 * `Alt+D` is typed one character at a time, and `A`, `Al`, `Alt` and `Alt+`
+	 * are all unusable as a hotkey. The first version of this refused them and
+	 * kept the stored value — which the declarative renderer then echoed back
+	 * into the box on the next keystroke, so the field snapped back to the old
+	 * combination and nothing could be typed at all.
+	 *
+	 * So a half-written value is kept as it stands and only canonicalized once it
+	 * parses. That leaves an unusable string in the settings for as long as
+	 * someone is typing; both readers already answer for it — the overlay falls
+	 * back to the default binding, and {@link sanitizeHotkeys} replaces it when
+	 * the tab closes. Nothing else in the plugin reads these two fields.
 	 */
-	private commitHotkey(key: HotkeySetting, value: string, input: HTMLInputElement): void {
-		const canonical = canonicalHotkey(value);
-		if (canonical === null) return;
-		this.settings[key] = canonical;
-		void this.persist();
-		if (input.value.trim().toLowerCase() === canonical.toLowerCase()) input.value = canonical;
+	private commitHotkey(key: HotkeySetting, value: string): void {
+		this.settings[key] = canonicalHotkey(value) ?? value;
+		this.commitLater();
+	}
+
+	/**
+	 * Replaces a half-written combination with the default. Runs when the tab
+	 * closes, which is the point at which "still typing" stops being true.
+	 */
+	private sanitizeHotkeys(): void {
+		for (const key of ['keepHotkey', 'dismissHotkey'] as const) {
+			this.settings[key] = canonicalHotkey(this.settings[key]) ?? DEFAULT_SETTINGS[key];
+		}
 	}
 
 	private renderCreatedField(containerEl: HTMLElement): void {

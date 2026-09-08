@@ -826,6 +826,52 @@ describe('changing a setting the index depends on', () => {
 		expect(indexFingerprint(harness.plugin.settings)).not.toBe(before);
 	});
 
+	it('lets a combination be typed one character at a time', () => {
+		vi.useFakeTimers();
+		const harness = createHarness();
+		harness.tab.display();
+		const input = settingByClass(harness, 'sift-setting-keep-hotkey').querySelector('input');
+		if (input === null) throw new Error('no keep-hotkey input');
+
+		// `A`, `Al`, `Alt` and `Alt+` are all unusable as a hotkey. Refusing them
+		// used to leave the stored value in place, which the declarative renderer
+		// echoed back into the box - so the field snapped back to the old
+		// combination on the first keystroke and nothing could be typed.
+		for (const value of ['A', 'Al', 'Alt', 'Alt+', 'Alt+D']) type(input, value);
+		expect(harness.plugin.settings.keepHotkey).toBe('Alt+D');
+
+		vi.advanceTimersByTime(1000);
+		expect(harness.saves.length).toBe(1);
+	});
+
+	it('keeps the half-written value while it is being typed', () => {
+		vi.useFakeTimers();
+		const harness = createHarness();
+		harness.tab.display();
+		const input = settingByClass(harness, 'sift-setting-dismiss-hotkey').querySelector('input');
+		if (input === null) throw new Error('no dismiss-hotkey input');
+
+		type(input, 'Alt');
+		// Unusable, and stored as it stands: both readers answer for it - the
+		// overlay falls back to its default binding, and closing the tab replaces
+		// it with the default for good.
+		expect(harness.plugin.settings.dismissHotkey).toBe('Alt');
+
+		harness.tab.hide();
+		expect(harness.plugin.settings.dismissHotkey).toBe(DEFAULT_SETTINGS.dismissHotkey);
+	});
+
+	it('stores a typed combination in its canonical spelling', () => {
+		vi.useFakeTimers();
+		const harness = createHarness();
+		harness.tab.display();
+		const input = settingByClass(harness, 'sift-setting-keep-hotkey').querySelector('input');
+		if (input === null) throw new Error('no keep-hotkey input');
+
+		type(input, 'strg umschalt j');
+		expect(harness.plugin.settings.keepHotkey).toBe('Mod+Shift+J');
+	});
+
 	it('commits the created field once the typing stops', () => {
 		vi.useFakeTimers();
 		const harness = createHarness();
