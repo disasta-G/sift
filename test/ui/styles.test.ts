@@ -113,8 +113,15 @@ describe('styles.css', () => {
 		expect(ends).toContain('background-color: var(--interactive-accent)');
 		expect(ends).toContain('color: var(--text-on-accent)');
 
+		// The days between carry the accent at low alpha, not the hover shade: a
+		// selected range has to stay distinguishable from the cell under the pointer.
 		const inside = BODY.match(/\.sift-cal__day--inside\s*\{([^}]*)\}/)?.[1] ?? '';
-		expect(inside).toContain('background-color: var(--background-modifier-hover)');
+		expect(inside).toContain('background-color: var(--text-selection)');
+
+		// The 2px grid gap is bridged in the same colour, so the range reads as one band.
+		expect(BODY).toMatch(
+			/\.sift-cal__day--inside \+ \.sift-cal__day--inside,[\s\S]*?box-shadow:\s*-2px 0 0 var\(--text-selection\)/,
+		);
 
 		// The popover is absolutely positioned, so the calendar cannot make the
 		// filter bar taller.

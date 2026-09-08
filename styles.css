@@ -643,10 +643,25 @@ rather than the light mockup's visible edge, so both themes agree.
 }
 
 /* The days between the two ends: the accent, held well back so the ends stay
-   the two things the eye lands on. */
+   the two things the eye lands on. --text-selection is that colour in every
+   theme — the accent at low alpha — and unlike the hover shade it cannot be
+   mistaken for the cell the pointer happens to sit on. */
 .sift-cal__day--inside {
-	background-color: var(--background-modifier-hover);
+	background-color: var(--text-selection);
+	border-radius: 0;
 	color: var(--text-normal);
+}
+
+/* The grid leaves 2px between cells, which would cut the range into separate
+   squares. Wherever two cells of the range meet, a shadow bridges that gap, so
+   the selection reads as one band with the two ends rounded. The pair is
+   adjacent in the same week only: a row start never carries a bridge, so
+   nothing bleeds into the padding beside the grid. */
+.sift-cal__day--start + .sift-cal__day--inside,
+.sift-cal__day--start + .sift-cal__day--end,
+.sift-cal__day--inside + .sift-cal__day--inside,
+.sift-cal__day--inside + .sift-cal__day--end {
+	box-shadow: -2px 0 0 var(--text-selection);
 }
 
 .sift-cal__day--start,
@@ -667,6 +682,13 @@ rather than the light mockup's visible edge, so both themes agree.
 	background-color: var(--background-modifier-active-hover, var(--background-modifier-hover));
 	border-color: transparent;
 	color: var(--text-normal);
+}
+
+/* The preview needs its own bridges, in its own colour — placed after the
+   committed ones so a previewed cell wins over the rule above. */
+.sift-cal__day--start + .sift-cal__day--preview,
+.sift-cal__day--preview + .sift-cal__day--preview {
+	box-shadow: -2px 0 0 var(--background-modifier-active-hover, var(--background-modifier-hover));
 }
 
 .sift-cal__day:focus-visible {
