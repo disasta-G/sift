@@ -166,6 +166,10 @@ A few conventions, so a patch does not bounce:
 
 Please open an issue using the bug report form. It deliberately does not ask for the content of your notes, and you should not paste any: a description of the query shape (for example "a two-word query with an umlaut in the second word") is enough to reproduce almost everything. If you attach console output, remove note titles and paths from it first.
 
+## Contributing
+
+Issues and pull requests are welcome. [CONTRIBUTING.md](CONTRIBUTING.md) has the setup, the house rules and what a patch needs in order to be merged, and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) applies to every space of this project. For a suspected security problem, do not open an issue — follow [SECURITY.md](SECURITY.md) instead.
+
 ## Licence
 
 MIT — see [LICENSE](LICENSE).
