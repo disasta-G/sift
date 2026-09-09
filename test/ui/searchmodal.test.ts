@@ -48,12 +48,15 @@ interface Harness {
 	leaves: FakeLeafRecord[];
 	files: Map<string, string>;
 	reads: string[];
+	/** What `workspace.getActiveFile()` answers from now on. */
+	setActiveFile(path: string | null): void;
 }
 
 function createApp(files: Record<string, string> = {}): Harness {
 	const content = new Map<string, string>(Object.entries(files));
 	const leaves: FakeLeafRecord[] = [];
 	const reads: string[] = [];
+	let activeFile: TFile | null = null;
 
 	const app = {
 		keymap: { pushScope: () => undefined, popScope: () => undefined },
@@ -66,7 +69,7 @@ function createApp(files: Record<string, string> = {}): Harness {
 			},
 		},
 		workspace: {
-			getActiveFile: (): TFile | null => null,
+			getActiveFile: (): TFile | null => activeFile,
 			getLeaf: (target: boolean | string) => {
 				const view = new MarkdownView(null);
 				const record: FakeLeafRecord = { target, opened: [], view };
@@ -83,7 +86,15 @@ function createApp(files: Record<string, string> = {}): Harness {
 		},
 	} as unknown as App;
 
-	return { app, leaves, files: content, reads };
+	return {
+		app,
+		leaves,
+		files: content,
+		reads,
+		setActiveFile: (path: string | null) => {
+			activeFile = path === null ? null : new TFile(path);
+		},
+	};
 }
 
 interface ModalHarness extends Harness {
@@ -109,8 +120,16 @@ function open(options: {
 	settings?: Partial<SiftSettings>;
 	files?: Record<string, string>;
 	query?: string;
+	/** The note the workspace reports as active while the overlay is constructed. */
+	activeNote?: string;
+	/**
+	 * Whether the workspace forgets that note once the overlay is on screen,
+	 * which is what a phone does: the modal covers the only leaf there.
+	 */
+	activeNoteLostOnOpen?: boolean;
 } = {}): ModalHarness {
 	const base = createApp(options.files);
+	if (options.activeNote !== undefined) base.setActiveFile(options.activeNote);
 	const searcher = fakeSearcher(options.hits ?? []);
 	const snippets = fakeSnippets(options.autoSnippets ?? true);
 	const indexer = fakeIndexer(options.ready ?? true);
@@ -125,6 +144,7 @@ function open(options: {
 		tuning: TUNING,
 	};
 	const modal = new SearchModal(base.app, deps, options.query);
+	if (options.activeNoteLostOnOpen === true) base.setActiveFile(null);
 	modal.open();
 
 	const harness: ModalHarness = {
@@ -921,6 +941,56 @@ describe('filter bar folding', () => {
 		// search and it would stop meaning anything.
 		const h = open({ settings: { defaultSort: 'modified-desc' } });
 		expect(toggle(h).hasClass('sift-filter-toggle--active')).toBe(false);
+	});
+});
+
+describe('the note the overlay was called from', () => {
+	function noteToggle(h: ModalHarness): HTMLElement {
+		const el = h.modal.contentEl.querySelector('.sift-toggle--note');
+		if (!(el instanceof HTMLElement)) throw new Error('no note switch');
+		return el;
+	}
+
+	function noteInput(h: ModalHarness): HTMLInputElement {
+		const el = noteToggle(h).querySelector('.sift-toggle__input');
+		if (!(el instanceof HTMLInputElement)) throw new Error('no note checkbox');
+		return el;
+	}
+
+	it('offers the switch for the note that was open', () => {
+		const h = open({ activeNote: 'Projekte/Offen.md' });
+
+		expect(noteInput(h).disabled).toBe(false);
+		expect(noteToggle(h).hasClass('sift-toggle--disabled')).toBe(false);
+	});
+
+	it('keeps offering it when the workspace forgets the note as the overlay opens', () => {
+		// A phone: the overlay covers the only leaf, so by the time `onOpen` runs
+		// the workspace reports no active file. Asking in the constructor, before
+		// the overlay is shown, is what keeps the switch usable there.
+		const h = open({ activeNote: 'Projekte/Offen.md', activeNoteLostOnOpen: true });
+
+		expect(noteInput(h).disabled).toBe(false);
+		expect(noteToggle(h).hasClass('sift-toggle--disabled')).toBe(false);
+	});
+
+	it('confines the search to that note when the switch is thrown', async () => {
+		const h = open({ activeNote: 'Projekte/Offen.md', activeNoteLostOnOpen: true, hits: hits(1) });
+
+		noteInput(h).checked = true;
+		noteInput(h).dispatchEvent(new Event('change'));
+		h.modal.setQuery('kaffee');
+		await h.modal.runSearch(true);
+
+		expect(h.searcher.calls.at(-1)?.options.filters.note).toBe('Projekte/Offen.md');
+	});
+
+	it('says why the switch is unavailable with nothing open', () => {
+		const h = open();
+
+		expect(noteInput(h).disabled).toBe(true);
+		expect(noteToggle(h).hasClass('sift-toggle--disabled')).toBe(true);
+		expect(noteInput(h).getAttribute('title')).toBe(t('filter.thisNoteNone'));
 	});
 });
 

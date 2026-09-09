@@ -179,7 +179,7 @@ The 10 000-note run is the release gate and has to be repeated before a release.
 
 ## Compatibility
 
-- Desktop and mobile. `isDesktopOnly` is `false`; there is no platform-specific code.
+- Desktop and mobile. `isDesktopOnly` is `false`; there is no platform-specific code. Tested on desktop as well as on Obsidian for Android and for iOS/iPadOS: the overlay goes full screen, the filter bar folds away behind the header button until you tap it, and every control is sized for a finger.
 - Minimum Obsidian version: **1.8.7** (see `manifest.json`).
 - Themes: Sift uses only Obsidian's own CSS variables, so it follows your theme in both light and dark mode.
 

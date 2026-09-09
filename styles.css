@@ -248,9 +248,11 @@ rather than the light mockup's visible edge, so both themes agree.
 }
 
 /* No open note, nothing to confine the search to: visibly unavailable rather
-   than absent, so the control stays where it was looked for. */
+   than absent, so the control stays where it was looked for. Muted text at half
+   opacity is close enough to the background of a dark theme to read as missing
+   on a phone, so the dimming stops at a level that still leaves a legible label. */
 .sift-toggle--disabled {
-	opacity: 0.5;
+	opacity: 0.7;
 	cursor: default;
 }
 

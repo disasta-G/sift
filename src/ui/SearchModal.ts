@@ -254,6 +254,10 @@ export class SearchModal extends Modal {
 	constructor(app: App, deps: SearchModalDeps, initialQuery?: string) {
 		super(app);
 		this.deps = deps;
+		// Read before the overlay takes the screen. On a phone the modal covers
+		// the whole workspace, and by the time `onOpen` runs Obsidian answers that
+		// no file is active - which left "This note" permanently disabled there.
+		this.activeNote = this.app.workspace.getActiveFile()?.path ?? null;
 		this.query = initialQuery ?? '';
 		this.sort = deps.settings.defaultSort;
 		this.fuzzy = deps.settings.fuzzyByDefault;
@@ -272,7 +276,10 @@ export class SearchModal extends Modal {
 
 	override onOpen(): void {
 		this.opened = true;
-		this.activeNote = this.app.workspace.getActiveFile()?.path ?? null;
+		// The constructor already asked, while the workspace still had its file.
+		// This is the fallback for an overlay constructed with none open and a
+		// note opened before it was shown, which is a desktop-only sequence.
+		this.activeNote ??= this.app.workspace.getActiveFile()?.path ?? null;
 		this.lifecycle.load();
 		this.modalEl.addClass('sift-modal');
 		this.containerEl.addClass('sift-modal-container');

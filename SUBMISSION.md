@@ -17,6 +17,11 @@ page every user of the plugin reads.
 - **README, LICENSE and manifest.json** sit in the repository root, which is
   where the directory looks for them.
 
+- **Mobile is checked, not merely declared.** `isDesktopOnly` is `false`, and
+  the overlay was exercised by hand in Obsidian for Android and for
+  iOS/iPadOS - full-screen overlay, folding filter bar, every filter and every
+  switch reachable with a finger. `README.md` says so under Compatibility.
+
 ## What still has to happen
 
 - **Record the remaining screenshots.** Three are in the repository and linked
