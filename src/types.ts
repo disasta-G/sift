@@ -76,14 +76,15 @@ export interface Span {
  * forces a full rebuild.
  *
  * Generation 2 added {@link IndexedFile.blockBreaks}, generation 3
- * {@link IndexedFile.properties}. The value that guards the store is
+ * {@link IndexedFile.properties}, generation 4 {@link IndexedFile.hasOpenTask}.
+ * The value that guards the store is
  * `SIFT_SCHEMA_VERSION` in `src/index/Store.ts`; it and this type move
  * together, and `Store.toIndexedFile` rejects a row that does not match. An
  * older store is therefore discarded on load rather than served with a field
  * missing — the cost is one rebuild after the update, which the settings tab
  * reports while it runs.
  */
-export type SchemaVersion = 3;
+export type SchemaVersion = 4;
 
 /* ========================================================================== */
 /* 2. Normalization                                                           */
@@ -128,6 +129,8 @@ export interface NormalizedDoc {
 	tags: readonly string[];
 	/** Frontmatter keys and their scalar values, folded. Used for `created` parsing and field weighting. */
 	frontmatter: Readonly<Record<string, string>>;
+	/** True when at least one list item carries an open task box. See {@link IndexedFile.hasOpenTask}. */
+	hasOpenTask: boolean;
 }
 
 /** One heading, located inside {@link NormalizedDoc.text}. */
@@ -233,6 +236,18 @@ export interface IndexedFile {
 	 * produces.
 	 */
 	properties: Readonly<Record<string, string>>;
+	/**
+	 * True when the note holds at least one list item with an open task box —
+	 * `- [ ]`, `- [/]` or `- [?]`. `[x]`, `[X]`, `[-]` and any other status count
+	 * as not open; `Normalizer.isOpenTaskMarker` is the single definition.
+	 *
+	 * Stored rather than derived, because the folded {@link IndexedFile.text} no
+	 * longer contains the brackets: the list marker and the inline scanner blank
+	 * them, so by the time a filter could look, the evidence is gone. Persisted
+	 * since generation 4, for the same reason `properties` is — the filter has to
+	 * answer for a file this session never opened.
+	 */
+	hasOpenTask: boolean;
 	/** `file.stat.size` in bytes. */
 	size: number;
 	/** `file.stat.mtime` at index time. Staleness check on startup compares against this. */
@@ -451,6 +466,13 @@ export interface SearchFilters {
 	modifiedTo: Millis | null;
 	/** One frontmatter property the note has to carry. `null` = no constraint. */
 	property: PropertyFilter | null;
+	/**
+	 * When true, only notes with at least one open task box pass. `false` is "no
+	 * constraint", never "notes without open tasks" — the switch has two
+	 * positions, and the second one is the absence of the filter, the way
+	 * `folder: null` is.
+	 */
+	openTasks: boolean;
 	/**
 	 * A single note the search is confined to, or `null` for the whole vault.
 	 *

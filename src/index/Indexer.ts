@@ -889,6 +889,7 @@ export class Indexer {
 			tags: doc.tags,
 			words: doc.words,
 			properties: doc.frontmatter,
+			hasOpenTask: doc.hasOpenTask,
 			createdAt: created.at,
 			modifiedAt: file.stat.mtime,
 			createdSource: created.source,

@@ -27,6 +27,7 @@ function makeFile(overrides: Partial<IndexedFile> = {}): IndexedFile {
 		title: 'kaffee',
 		titleNormalized: 'kaffee',
 		folder: 'Notes',
+		hasOpenTask: false,
 		pathNormalized: 'notes/kaffee.md',
 		text: 'kaffee und kuchen',
 		offsetMap: null,

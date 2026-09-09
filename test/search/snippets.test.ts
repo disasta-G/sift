@@ -76,6 +76,7 @@ function makeRecord(original: string, path = 'Notizen/Kueche.md', id = 1): Index
 		titleNormalized: stripFold(title),
 		blockBreaks: new Uint32Array(0),
 		folder: slash < 0 ? '' : path.slice(0, slash),
+		hasOpenTask: false,
 		pathNormalized: stripFold(path),
 		text: folded,
 		offsetMap: null,

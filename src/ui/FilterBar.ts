@@ -435,6 +435,8 @@ export class FilterBar {
 	private readonly propertyRemoveEl: HTMLElement;
 	private readonly noteEl: HTMLInputElement;
 	private readonly noteLabelEl: HTMLElement;
+	private readonly openTasksEl: HTMLInputElement;
+	private readonly openTasksLabelEl: HTMLElement;
 	private readonly subfoldersEl: HTMLInputElement;
 	private readonly subfoldersLabelEl: HTMLElement;
 	private readonly fuzzyEl: HTMLInputElement;
@@ -617,6 +619,16 @@ export class FilterBar {
 			this.emitFilters({ note: this.noteEl.checked ? this.state.activeNote : null });
 		});
 
+		// Notes that still have work in them. Off is the absence of the filter,
+		// not its inverse: there is no "notes without open todos" position.
+		const openTasks = this.buildToggle('filter.openTasks', 'sift-toggle--todo');
+		this.openTasksEl = openTasks.input;
+		this.openTasksLabelEl = openTasks.label;
+		this.openTasksEl.setAttr('title', t('filter.openTasksTooltip'));
+		this.lifecycle.registerDomEvent(this.openTasksEl, 'change', () => {
+			this.emitFilters({ openTasks: this.openTasksEl.checked });
+		});
+
 		const fuzzy = this.buildToggle('filter.similar', 'sift-toggle--similar');
 		this.fuzzyEl = fuzzy.input;
 		this.fuzzyLabelEl = fuzzy.label;
@@ -779,7 +791,7 @@ export class FilterBar {
 		// auto margin still holds them at the right end of the line they land on,
 		// where a spacer would leave them stranded on the left.
 		const switches = this.el.createDiv({ cls: 'sift-filters__switches' });
-		switches.append(this.noteLabelEl, this.subfoldersLabelEl, this.fuzzyLabelEl);
+		switches.append(this.noteLabelEl, this.openTasksLabelEl, this.subfoldersLabelEl, this.fuzzyLabelEl);
 		spacer.remove();
 		this.el.append(this.pathChipEl, this.propertyChipEl, this.dateWrapEl, sort, switches, this.statusEl);
 
@@ -1059,6 +1071,7 @@ export class FilterBar {
 		this.renderPath();
 		this.renderNote();
 		this.renderProperty();
+		this.renderOpenTasks();
 		this.renderSubfolders();
 		this.applyFuzzy();
 		this.renderDate();
@@ -1103,6 +1116,12 @@ export class FilterBar {
 		this.noteLabelEl.toggleClass('sift-toggle--on', on);
 		this.noteLabelEl.toggleClass('sift-toggle--disabled', active === null);
 		this.noteEl.setAttr('title', active === null ? t('filter.thisNoteNone') : t('filter.thisNoteTooltip'));
+	}
+
+	private renderOpenTasks(): void {
+		const on = this.state.filters.openTasks;
+		if (this.openTasksEl.checked !== on) this.openTasksEl.checked = on;
+		this.openTasksLabelEl.toggleClass('sift-toggle--on', on);
 	}
 
 	private renderSubfolders(): void {
@@ -1420,6 +1439,7 @@ function filtersEqual(a: SearchFilters, b: SearchFilters): boolean {
 	return (
 		a.folder === b.folder &&
 		a.includeSubfolders === b.includeSubfolders &&
+		a.openTasks === b.openTasks &&
 		a.createdFrom === b.createdFrom &&
 		a.createdTo === b.createdTo &&
 		a.modifiedFrom === b.modifiedFrom &&

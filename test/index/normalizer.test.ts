@@ -835,3 +835,72 @@ describe('parseDateValue', () => {
 		}
 	});
 });
+
+/* ========================================================================== */
+/* Open task boxes                                                            */
+/* ========================================================================== */
+
+describe('normalizeDocument — hasOpenTask', () => {
+	function hasOpenTask(raw: string): boolean {
+		return normalize(raw).hasOpenTask;
+	}
+
+	it('reads the empty box and the two in-between states as open', () => {
+		for (const status of [' ', '/', '?']) {
+			expect(hasOpenTask(`- [${status}] Rechnung schreiben\n`), status).toBe(true);
+		}
+	});
+
+	it('reads a finished, a cancelled and an unknown box as not open', () => {
+		for (const status of ['x', 'X', '-', '>', '!', '*']) {
+			expect(hasOpenTask(`- [${status}] Rechnung schreiben\n`), status).toBe(false);
+		}
+	});
+
+	it('accepts every list marker Markdown allows', () => {
+		for (const marker of ['-', '*', '+', '1.', '3)']) {
+			expect(hasOpenTask(`${marker} [ ] Rechnung schreiben\n`), marker).toBe(true);
+		}
+	});
+
+	it('follows the box into indented items and block quotes', () => {
+		expect(hasOpenTask('- Projekt\n    - [ ] Teilschritt\n')).toBe(true);
+		expect(hasOpenTask('> - [ ] Teilschritt\n')).toBe(true);
+	});
+
+	it('needs a box that stands on its own', () => {
+		// A wiki link opens with two brackets, an empty box followed by text is
+		// not a box, and a box in running text is not a task item.
+		expect(hasOpenTask('- [[Notiz]] lesen\n')).toBe(false);
+		expect(hasOpenTask('- [ ]x Rechnung\n')).toBe(false);
+		expect(hasOpenTask('Die Liste [ ] steht mitten im Satz.\n')).toBe(false);
+	});
+
+	it('accepts a box that is the whole item', () => {
+		expect(hasOpenTask('- [ ]')).toBe(true);
+	});
+
+	it('ignores boxes inside a fenced code block', () => {
+		expect(hasOpenTask('```\n- [ ] nur ein Beispiel\n```\n')).toBe(false);
+	});
+
+	it('ignores a box in the frontmatter', () => {
+		expect(hasOpenTask('---\nstatus: "- [ ]"\n---\n\nText ohne Aufgabe.\n')).toBe(false);
+	});
+
+	it('is false for a note without any list at all', () => {
+		expect(hasOpenTask('# Titel\n\nNur Fliesstext.\n')).toBe(false);
+	});
+
+	it('reports one open item among many finished ones', () => {
+		expect(hasOpenTask('- [x] eins\n- [x] zwei\n- [ ] drei\n')).toBe(true);
+		expect(hasOpenTask('- [x] eins\n- [x] zwei\n')).toBe(false);
+	});
+
+	it('leaves the folded text and the offset contract untouched', () => {
+		const raw = '- [ ] Kaffee kaufen\n';
+		const doc = normalize(raw);
+		expect(doc.text).toHaveLength(raw.length);
+		expect(doc.text).toContain('kaffee kaufen');
+	});
+});

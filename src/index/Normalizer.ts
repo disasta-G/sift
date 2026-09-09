@@ -582,6 +582,7 @@ const CHAR_ZERO = 0x30;
 const CHAR_NINE = 0x39;
 const CHAR_COLON = 0x3a;
 const CHAR_LT = 0x3c;
+const CHAR_QUESTION = 0x3f;
 const CHAR_EQUALS = 0x3d;
 const CHAR_GT = 0x3e;
 const CHAR_UPPER_A = 0x41;
@@ -616,6 +617,8 @@ interface ScanResult {
 	blockBreaks: number[];
 	tags: string[];
 	fields: Map<string, string>;
+	/** True as soon as one list item carries an unfinished task box. See {@link isOpenTaskMarker}. */
+	hasOpenTask: boolean;
 }
 
 function isSpaceCode(code: number): boolean {
@@ -831,11 +834,37 @@ function matchListMarker(raw: string, start: number, finish: number): number {
 	return i;
 }
 
+/**
+ * Whether the list item starting at `start` — already past its `-`/`1.` marker —
+ * opens with a task box that is still open.
+ *
+ * Open is `[ ]`, `[/]` and `[?]`: the empty box and the two in-between states
+ * that themes and the Tasks plugin draw as "started" and "question". `[x]`,
+ * `[X]` and `[-]` (cancelled) are done in the sense the filter asks about, and
+ * so is every other single character — an unknown status is not evidence of
+ * work left over, and reading it as open would make the filter answer yes for
+ * any vault whose theme invents its own boxes.
+ *
+ * The box has to be followed by a space or end the line, so `[ ]x` and a wiki
+ * link `[[note]]` are not task boxes. Nothing here is blanked: the box is
+ * punctuation that the inline scanner already handles, and this pass only reads.
+ */
+function isOpenTaskMarker(raw: string, start: number, finish: number): boolean {
+	if (start + 3 > finish) return false;
+	if (raw.charCodeAt(start) !== CHAR_OPEN_BRACKET) return false;
+	if (raw.charCodeAt(start + 2) !== CHAR_CLOSE_BRACKET) return false;
+	const after = start + 3;
+	if (after < finish && !isSpaceCode(raw.charCodeAt(after))) return false;
+	const status = raw.charCodeAt(start + 1);
+	return status === CHAR_SPACE || status === CHAR_SLASH || status === CHAR_QUESTION;
+}
+
 function scanDocument(raw: string, createdKey: string): ScanResult {
 	const length = raw.length;
 	const blank = new Uint8Array(length);
 	const headings: RawHeading[] = [];
 	const blockBreaks: number[] = [];
+	let hasOpenTask = false;
 	const tags: string[] = [];
 	const fields = new Map<string, string>();
 
@@ -1261,6 +1290,9 @@ function scanDocument(raw: string, createdKey: string): ScanResult {
 		const afterMarker = matchListMarker(raw, contentStart, lineFinish);
 		const isListItem = afterMarker > contentStart;
 		if (isListItem) {
+			// Read the task box before the marker is blanked and before the inline
+			// scanner runs: after that the brackets are gone from the folded text.
+			if (!hasOpenTask && isOpenTaskMarker(raw, afterMarker, lineFinish)) hasOpenTask = true;
 			blankRange(contentStart, afterMarker);
 			contentStart = afterMarker;
 		}
@@ -1274,7 +1306,7 @@ function scanDocument(raw: string, createdKey: string): ScanResult {
 		}
 	}
 
-	return { blank, frontmatter, headings, blockBreaks, tags, fields };
+	return { blank, frontmatter, headings, blockBreaks, tags, fields, hasOpenTask };
 }
 
 /* ========================================================================== */
@@ -1463,5 +1495,6 @@ export function normalizeDocument(raw: string, settings: Pick<SiftSettings, 'cre
 		words: extractWords(folded.text),
 		tags: scan.tags,
 		frontmatter: Object.fromEntries(scan.fields),
+		hasOpenTask: scan.hasOpenTask,
 	};
 }

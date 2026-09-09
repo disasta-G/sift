@@ -28,6 +28,8 @@
 	"filter.thisNote": "Diese Notiz",
 	"filter.thisNoteTooltip": "Nur in der geöffneten Notiz suchen",
 	"filter.thisNoteNone": "Es ist keine Notiz geöffnet",
+	"filter.openTasks": "Offene Todos",
+	"filter.openTasksTooltip": "Nur Notizen mit einer unerledigten Aufgabe",
 	"filter.similar": "Ähnlich",
 	"filter.similarTooltip": "Findet auch ähnliche Schreibweisen",
 	"filter.created": "Erstellt",

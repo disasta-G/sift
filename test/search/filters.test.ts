@@ -76,6 +76,7 @@ function filtersWith(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedFrom: null,
 		modifiedTo: null,
 		property: null,
+		openTasks: false,
 		note: null,
 		excludedFolders: [],
 		...overrides,
@@ -141,6 +142,31 @@ const PROPERTY_VAULT: Record<string, FakeFileSpec> = {
 	'Ohne.md': { content: note('Ohne'), ctime: BASE, mtime: BASE },
 };
 
+/**
+ * Notes for the open-todo filter. The set is chosen so that "has a checkbox"
+ * and "has an OPEN checkbox" give different answers: `Erledigt` is all boxes
+ * and none of them open, `Codeblock` writes an open box inside a fence where it
+ * is an example rather than a task, and `Gemischt` hides its one open item
+ * under two finished ones.
+ */
+const TODO_VAULT: Record<string, FakeFileSpec> = {
+	'Offen.md': { content: '# Offen\n\n- [ ] Kaffee kaufen\n', ctime: BASE, mtime: BASE },
+	'Angefangen.md': { content: '# Angefangen\n\n- [/] Kaffee kaufen\n', ctime: BASE, mtime: BASE },
+	'Frage.md': { content: '# Frage\n\n- [?] Kaffee kaufen\n', ctime: BASE, mtime: BASE },
+	'Gemischt.md': {
+		content: '# Gemischt\n\n- [x] eins\n- [X] zwei\n- [ ] drei\n',
+		ctime: BASE,
+		mtime: BASE,
+	},
+	'Erledigt.md': { content: '# Erledigt\n\n- [x] eins\n- [-] zwei\n', ctime: BASE, mtime: BASE },
+	'Codeblock.md': {
+		content: '# Codeblock\n\n```md\n- [ ] Beispiel\n```\n',
+		ctime: BASE,
+		mtime: BASE,
+	},
+	'Fliesstext.md': { content: note('Fliesstext'), ctime: BASE, mtime: BASE },
+};
+
 const ALPHA = 'Projekte/Alpha.md';
 const BETA = 'Projekte/2024/Beta.md';
 const GAMMA = 'Projekte2/Gamma.md';
@@ -160,17 +186,20 @@ const VAULT_NOTES = 600;
 
 let small: Harness;
 let properties: Harness;
+let todos: Harness;
 let vault: LoadedVault;
 let fixture: Harness;
 
 beforeAll(async () => {
 	small = await buildHarness(FOLDER_VAULT);
 	properties = await buildHarness(PROPERTY_VAULT);
+	todos = await buildHarness(TODO_VAULT);
 	vault = loadVault(undefined, VAULT_NOTES);
 	fixture = await buildHarness(vault.files);
 }, 120_000);
 
 afterAll(() => {
+	todos?.indexer.stop();
 	small?.indexer.stop();
 	properties?.indexer.stop();
 	fixture?.indexer.stop();
@@ -213,6 +242,50 @@ describe('Searcher — property filter', () => {
 	it('counts as an active filter, so it searches on its own', () => {
 		expect(hasActiveFilters(filtersWith({ property: { key: 'status', value: null } }))).toBe(true);
 		expect(hasActiveFilters(filtersWith())).toBe(false);
+	});
+});
+
+describe('Searcher — open-todo filter', () => {
+	it('keeps every note with an unfinished box and drops the rest', () => {
+		expect(passing(todos, filtersWith({ openTasks: true }))).toEqual([
+			'Angefangen.md',
+			'Frage.md',
+			'Gemischt.md',
+			'Offen.md',
+		]);
+	});
+
+	it('lets everything through while the switch is off', () => {
+		expect(passing(todos, filtersWith())).toEqual([
+			'Angefangen.md',
+			'Codeblock.md',
+			'Erledigt.md',
+			'Fliesstext.md',
+			'Frage.md',
+			'Gemischt.md',
+			'Offen.md',
+		]);
+	});
+
+	it('searches on its own, with no query term', () => {
+		expect(paths(run(todos.searcher, '', filtersWith({ openTasks: true })))).toEqual([
+			'Angefangen.md',
+			'Frage.md',
+			'Gemischt.md',
+			'Offen.md',
+		]);
+	});
+
+	it('narrows a query the same way every other filter does', () => {
+		expect(paths(run(todos.searcher, 'kaffee', filtersWith({ openTasks: true })))).toEqual([
+			'Angefangen.md',
+			'Frage.md',
+			'Offen.md',
+		]);
+	});
+
+	it('combines with a folder or a date bound instead of replacing it', () => {
+		expect(passing(todos, filtersWith({ openTasks: true, createdTo: BASE - 1 }))).toEqual([]);
 	});
 });
 
@@ -511,6 +584,12 @@ describe('hasActiveFilters', () => {
 			expect(hasActiveFilters(filtersWith({ folder: root }))).toBe(false);
 			expect(hasActiveFilters(filtersWith({ folder: root, includeSubfolders: false }))).toBe(true);
 		}
+	});
+
+	it('is true while the open-todo switch is on, and only then', () => {
+		expect(hasActiveFilters(filtersWith({ openTasks: true }))).toBe(true);
+		// Off is the absence of the filter, not "notes without open todos".
+		expect(hasActiveFilters(filtersWith({ openTasks: false }))).toBe(false);
 	});
 
 	it('does not count the excluded folders from the settings', () => {

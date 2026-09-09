@@ -28,6 +28,8 @@
 	"filter.thisNote": "This note",
 	"filter.thisNoteTooltip": "Search only in the note that was open",
 	"filter.thisNoteNone": "No note is open",
+	"filter.openTasks": "Open todos",
+	"filter.openTasksTooltip": "Only notes with an unfinished task",
 	"filter.similar": "Similar",
 	"filter.similarTooltip": "Also match close spellings",
 	"filter.created": "Created",

@@ -54,6 +54,7 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedFrom: null,
 		modifiedTo: null,
 		property: null,
+		openTasks: false,
 		note: null,
 		excludedFolders: [],
 		...overrides,
@@ -262,6 +263,42 @@ describe('this-note switch', () => {
 	});
 });
 
+describe('open-todo switch', () => {
+	function todoToggle(h: Harness): HTMLInputElement {
+		return input(h.bar, '.sift-toggle--todo .sift-toggle__input');
+	}
+
+	it('turns the filter on and off again', () => {
+		const h = mount();
+
+		todoToggle(h).checked = true;
+		todoToggle(h).dispatchEvent(new Event('change'));
+		expect(h.filters[0].openTasks).toBe(true);
+
+		todoToggle(h).checked = false;
+		todoToggle(h).dispatchEvent(new Event('change'));
+		expect(h.filters[1].openTasks).toBe(false);
+	});
+
+	it('shows the filter it was given, and promotes its label', () => {
+		const h = mount(baseState({ filters: baseFilters({ openTasks: true }) }));
+		expect(todoToggle(h).checked).toBe(true);
+		expect(button(h.bar, '.sift-toggle--todo').hasClass('sift-toggle--on')).toBe(true);
+	});
+
+	it('follows a state change back to off', () => {
+		const h = mount(baseState({ filters: baseFilters({ openTasks: true }) }));
+		h.bar.setState(baseState({ filters: baseFilters({ openTasks: false }) }));
+		expect(todoToggle(h).checked).toBe(false);
+		expect(button(h.bar, '.sift-toggle--todo').hasClass('sift-toggle--on')).toBe(false);
+	});
+
+	it('is always available — unlike "This note" it needs nothing to be open', () => {
+		const h = mount(baseState({ activeNote: null }));
+		expect(todoToggle(h).disabled).toBe(false);
+	});
+});
+
 describe('bar order', () => {
 	it('reads folder, property, date, sort, then the switches on the right', () => {
 		const h = mount();
@@ -276,13 +313,14 @@ describe('bar order', () => {
 			'sift-sort',
 			'sift-filters__switches',
 		]);
-		// The three switches, in the group, in this order.
+		// The four switches, in the group, in this order.
 		const switches = Array.from(
 			h.bar.el.querySelectorAll('.sift-filters__switches > .sift-toggle'),
 		).map((el) => el.className);
 		expect(switches[0]).toContain('sift-toggle--note');
-		expect(switches[1]).toContain('sift-toggle--subfolders');
-		expect(switches[2]).toContain('sift-toggle--similar');
+		expect(switches[1]).toContain('sift-toggle--todo');
+		expect(switches[2]).toContain('sift-toggle--subfolders');
+		expect(switches[3]).toContain('sift-toggle--similar');
 	});
 });
 

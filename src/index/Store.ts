@@ -34,7 +34,7 @@ import type {
  * Persisted-schema generation. Bumping it discards the IndexedDB content and
  * forces a full rebuild on the next start.
  */
-export const SIFT_SCHEMA_VERSION: SchemaVersion = 3;
+export const SIFT_SCHEMA_VERSION: SchemaVersion = 4;
 
 /**
  * Records written per transaction when the caller injects no batch size.
@@ -211,6 +211,11 @@ function toIndexedFile(value: unknown): IndexedFile | null {
 	// property filter would read every one of those notes as having none —
 	// silently, and only for the files that came back from disk.
 	if (!isStringRecord(file.properties)) {
+		return null;
+	}
+	// Generation 4. A row from generation 3 has no `hasOpenTask`, and the open-task
+	// filter would read every one of those notes as having none.
+	if (typeof file.hasOpenTask !== 'boolean') {
 		return null;
 	}
 	return value as IndexedFile;

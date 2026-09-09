@@ -27,6 +27,7 @@ The settings tab. It reports how many notes are indexed and how much memory the 
 - **Operators.** Spaces mean AND, `"quoted text"` is an exact phrase, `-word` excludes, `a OR b` accepts either.
 - **Field prefixes.** `path:`, `tag:`, `title:` and `prop:` limit a single term to that field. `prop:status` finds every note that has a `status` property, `prop:status=offen` only those whose value contains `offen`, and `-prop:status` excludes them.
 - **Path, property and date filters.** Restrict a search to one folder, with or without its subfolders; to a note property, either by its presence alone or by a value; and to a created or modified date range, with quick picks for today, the last 7 days, 30 days and year. The property chip completes both the name and the value from the properties your vault actually uses.
+- **Open todos.** One switch narrows the result to the notes that still have something unfinished in them — `- [ ]`, `- [/]` and `- [?]` count as open, a ticked or cancelled box does not. It works on its own, with no search term at all.
 - **Search inside one note.** The "This note" switch confines the run to the note that was open when you called the overlay — the whole query language, filters included, applied to a single file.
 - **Ranked results.** Hits in the title, in frontmatter, in a tag and in a heading count for more than hits in the body; several matching terms close together count for more than the same terms far apart; whole-word matches get a bonus and recently edited notes a small one. The result is shown as a relevance value from 0 to 100. The order can be switched to created, modified, title or path at any time.
 - **Excerpts with highlighted hits.** Every card shows up to three excerpts of about 160 characters, cut from the original note text, so umlauts, casing and Markdown look exactly as you wrote them. The sentence around the hit is rendered in the normal text colour, its surroundings muted.
@@ -104,6 +105,7 @@ The chip row under the search field holds:
 
 - **Folder** — pick one folder; the search is limited to it. "Include subfolders" decides whether notes further down count.
 - **Created** and **Modified** — a date range with quick picks for the last 7 days, 30 days and year. The created date is read from your frontmatter date field where present, otherwise from the file itself.
+- **Open todos** — only notes that still have an unfinished task in them: a list item written `- [ ]`, `- [/]` or `- [?]`. A box that is ticked (`- [x]`), cancelled (`- [-]`) or carries any other status does not count, and a checkbox inside a fenced code block is an example rather than a task.
 - **Similar** — the typo tolerance described above.
 - **Sort** — relevance, created, modified, title or path.
 - The hit counter on the right shows how many notes matched and how long the search took.

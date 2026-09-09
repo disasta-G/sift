@@ -1172,17 +1172,25 @@ rather than the light mockup's visible edge, so both themes agree.
 /* ========================================================================== */
 
 @media (max-width: 800px) {
-	/* `dvh` after `vh`: the fallback keeps an old webview working, and where the
-	   dynamic unit is understood the panel follows the browser chrome and the
-	   on-screen keyboard instead of standing 100vh tall behind them. */
+	/* `vh` is the floor an old webview can render; where the dynamic unit is
+	   understood the panel follows the browser chrome and the on-screen keyboard
+	   instead of standing 100vh tall behind them. The override lives in its own
+	   `@supports` block rather than as a second declaration in this rule: same
+	   cascade, but no property is declared twice, which a CSS linter reads as a
+	   mistake rather than as a fallback. */
 	.sift-modal {
 		width: 100vw;
 		max-width: 100vw;
 		height: 100vh;
 		max-height: 100vh;
-		height: 100dvh;
-		max-height: 100dvh;
 		border-radius: 0;
+	}
+
+	@supports (height: 100dvh) {
+		.sift-modal {
+			height: 100dvh;
+			max-height: 100dvh;
+		}
 	}
 
 	/* Full-bleed means the panel owns the notch and the home indicator too, so
