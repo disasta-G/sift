@@ -352,6 +352,11 @@ rather than the light mockup's visible edge, so both themes agree.
 .sift-chip--property {
 	flex: 0 0 auto;
 	width: 32ch;
+	/* The chip is a text box with decoration around it, so it keeps the text
+	   cursor throughout. With the chip's own `pointer` here, the cursor flickered
+	   between the two every time the mouse crossed the gap between the box and
+	   the chip's border. */
+	cursor: text;
 }
 
 .sift-chip--property {
@@ -367,6 +372,11 @@ rather than the light mockup's visible edge, so both themes agree.
 	flex: 1 1 0;
 	width: auto;
 	min-width: 0;
+	/* Full height of the chip rather than the line box: the strip of padding above
+	   and below the text used to belong to the chip, not to the box, so a mouse
+	   resting there was outside the field it was pointing at. */
+	align-self: stretch;
+	height: auto;
 }
 
 /* The name box takes the larger share of the two: a property is named before it

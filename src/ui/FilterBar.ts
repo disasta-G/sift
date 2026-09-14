@@ -532,6 +532,15 @@ export class FilterBar {
 			evt.preventDefault();
 			this.commitFolder('');
 		});
+		// The chip reads as one text box, so the margin around the box - the icon
+		// and the padding beside it - hands the click to the box instead of
+		// swallowing it.
+		this.lifecycle.registerDomEvent(this.pathChipEl, 'mousedown', (evt: MouseEvent) => {
+			if (evt.target !== this.pathChipEl && evt.target !== folderIcon && !folderIcon.contains(evt.target as Node))
+				return;
+			evt.preventDefault();
+			this.pathInputEl.focus();
+		});
 
 		/* --- property chip -------------------------------------------------- */
 		// Two boxes in one chip: the property name, and the value it has to carry.
