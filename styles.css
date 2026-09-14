@@ -397,6 +397,10 @@ rather than the light mockup's visible edge, so both themes agree.
 
 .sift-chip__remove {
 	display: none;
+	/* Full chip height, like the text boxes: a button shorter than the chip leaves
+	   a strip of chip above and below it, and the cursor changes across it. */
+	align-self: stretch;
+	align-items: center;
 	padding: 0;
 	border: none;
 	background-color: transparent;
@@ -738,6 +742,9 @@ rather than the light mockup's visible edge, so both themes agree.
 	border: 1px solid var(--background-modifier-border);
 	border-radius: 6px;
 	color: var(--text-muted);
+	/* The whole chip opens the dropdown, so it carries the dropdown's cursor -
+	   see .sift-chip--path for what happens when only the box inside does. */
+	cursor: pointer;
 }
 
 .sift-sort:hover {
@@ -766,7 +773,8 @@ rather than the light mockup's visible edge, so both themes agree.
 .sift-sort__select,
 .sift-sort__select:focus,
 .sift-sort__select:hover {
-	height: 19.5px;
+	align-self: stretch;
+	height: auto;
 	padding: 0;
 	border: none;
 	outline: none;
