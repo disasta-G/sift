@@ -222,6 +222,10 @@ A few conventions, so a patch does not bounce:
 
 `test/fixtures/vault` is generated, never edited by hand: it holds German and English notes with compound words, umlauts, frontmatter dates and nested folders, which is what the offset and folding tests are built on.
 
+## Changelog
+
+[CHANGELOG.md](CHANGELOG.md) records what changed in every release, newest first.
+
 ## Reporting a bug
 
 Please open an issue using the bug report form. It deliberately does not ask for the content of your notes, and you should not paste any: a description of the query shape (for example "a two-word query with an umlaut in the second word") is enough to reproduce almost everything. If you attach console output, remove note titles and paths from it first.

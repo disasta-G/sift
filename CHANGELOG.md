@@ -6,6 +6,8 @@ numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.5.0] — 2026-09-18
+
 ### Changed
 
 - **An exclusion matches whole words now.** `-altbau` used to be a substring
@@ -115,7 +117,8 @@ The first release. Local full-text and substring search for an Obsidian vault:
 
 Everything runs on the device; the plugin makes no network requests.
 
-[Unreleased]: https://github.com/disasta-G/sift/compare/1.4.1...HEAD
+[Unreleased]: https://github.com/disasta-G/sift/compare/1.5.0...HEAD
+[1.5.0]: https://github.com/disasta-G/sift/compare/1.4.1...1.5.0
 [1.4.1]: https://github.com/disasta-G/sift/compare/1.4.0...1.4.1
 [1.4.0]: https://github.com/disasta-G/sift/compare/1.3.0...1.4.0
 [1.3.0]: https://github.com/disasta-G/sift/compare/1.2.1...1.3.0
