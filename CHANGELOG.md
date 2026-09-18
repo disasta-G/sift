@@ -6,6 +6,24 @@ numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Canvases and bases are searched.** Sift read `.md` and nothing else, so the
+  canvases and base files in a vault were invisible to it. A `.canvas` is now
+  searched by the text on its cards, its group and edge labels, and the notes it
+  embeds; a `.base` by its view names and filters. Both are on by default and
+  have a switch of their own in the settings.
+
+- **A "Notes only" switch** in the filter bar hides the other kinds from a
+  single search without touching the index. Like "Open todos", the off position
+  is the absence of the filter and not its opposite.
+
+### Changed
+
+- The stored index is rebuilt once after this update. Records carry the file
+  kind now, and the settings fingerprint counts it — without that, switching a
+  kind off would leave its records in the database.
+
 ## [1.5.0] — 2026-09-18
 
 ### Changed

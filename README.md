@@ -28,6 +28,7 @@ The settings tab. It reports how many notes are indexed and how much memory the 
 - **Field prefixes.** `path:`, `tag:`, `title:` and `prop:` limit a single term to that field. `prop:status` finds every note that has a `status` property, `prop:status=offen` only those whose value contains `offen`, and `-prop:status` excludes them.
 - **Path, property and date filters.** Restrict a search to one folder, with or without its subfolders; to a note property, either by its presence alone or by a value; and to a created or modified date range, with quick picks for today, the last 7 days, 30 days and year. The property chip completes both the name and the value from the properties your vault actually uses.
 - **Open todos.** One switch narrows the result to the notes that still have something unfinished in them — `- [ ]`, `- [/]` and `- [?]` count as open, a ticked or cancelled box does not. It works on its own, with no search term at all.
+- **Canvases and bases too.** A `.canvas` is searched by the text on its cards, its group names and the notes it embeds; a `.base` by its view names and filters. Both are indexed by default and can be switched off individually, and the "Notes only" switch hides them from a single search without touching the index.
 - **Search inside one note.** The "This note" switch confines the run to the note that was open when you called the overlay — the whole query language, filters included, applied to a single file.
 - **Ranked results.** Hits in the title, in frontmatter, in a tag and in a heading count for more than hits in the body; several matching terms close together count for more than the same terms far apart; whole-word matches get a bonus and recently edited notes a small one. The result is shown as a relevance value from 0 to 100. The order can be switched to created, modified, title or path at any time.
 - **Excerpts with highlighted hits.** Every card shows up to three excerpts of about 160 characters, cut from the original note text, so umlauts, casing and Markdown look exactly as you wrote them. The sentence around the hit is rendered in the normal text colour, its surroundings muted.
@@ -109,6 +110,7 @@ The chip row under the search field holds:
 - **Folder** — pick one folder; the search is limited to it. "Include subfolders" decides whether notes further down count.
 - **Created** and **Modified** — a date range with quick picks for the last 7 days, 30 days and year. The created date is read from your frontmatter date field where present, otherwise from the file itself.
 - **Open todos** — only notes that still have an unfinished task in them: a list item written `- [ ]`, `- [/]` or `- [?]`. A box that is ticked (`- [x]`), cancelled (`- [-]`) or carries any other status does not count, and a checkbox inside a fenced code block is an example rather than a task.
+- **Notes only** — hides canvases and bases from the result list. Off means no constraint, not the opposite: there is no "canvases only" position here.
 - **Similar** — the typo tolerance described above.
 - **Sort** — relevance, created, modified, title or path.
 - The hit counter on the right shows how many notes matched and how long the search took.
@@ -123,13 +125,15 @@ Each chip can be removed individually; nothing is remembered between two searche
 | Snippets per result | How many excerpts a result card shows, 1 to 3. |
 | Created date field | Frontmatter key read as the creation date; the file date is used when the key is missing. |
 | Excluded folders | One folder per line. These folders are never indexed and never searched. |
+| Index canvases | Search the text of canvas cards, group names and the notes a canvas embeds. On by default. |
+| Index bases | Search the view names and filters of base files. On by default. |
 | Language | Interface language: automatic, English or German. |
 | Similar matching by default | Starts every search with the "Similar" toggle switched on. |
 | Include subfolders by default | Starts every search with the subfolders of the chosen folder included. |
 | Maximum results | Upper limit of results shown per search. |
 | Keep hotkey | Combination that marks the selected result as worth keeping. Default `Ctrl+Shift+K`. |
 | Dismiss hotkey | Combination that removes the selected result from the run. Default `Ctrl+Shift+X`. |
-| Rebuild index | Reads every note again. Needed after changing the excluded folders or the created date field. The settings tab also shows how many notes are indexed and roughly how much memory the index uses. |
+| Rebuild index | Reads every note again. Needed after changing the excluded folders or the created date field; switching a file kind on or off rebuilds by itself. The settings tab also shows how many notes are indexed and roughly how much memory the index uses. |
 
 ### Changing the two curation hotkeys
 
@@ -170,15 +174,19 @@ Measured with `npm run bench` against the generated 10 000-note test vault, medi
 
 | What | Measured | Target |
 | --- | --- | --- |
-| Cold index of 10 000 notes | 1.97 s | under 5 s |
-| Warm start from the stored index | 1.22 s | — |
+| Cold index of 10 000 notes | 2.06 s | under 5 s |
+| Warm start from the stored index | 1.27 s | — |
 | Index memory for 10 000 notes | 50.9 MB | under 100 MB |
-| Re-index one changed note | 114 ms | — |
-| Slowest of 34 search shapes | 43.4 ms | under 100 ms |
+| Re-index one changed note | 111 ms | — |
+| Slowest of 35 search shapes | 43.9 ms | under 100 ms |
 
-The search figure is the p95 of the slowest of 34 query shapes the benchmark runs — single terms, infix terms, two- and three-term queries, phrases, exclusions, OR groups, the `path:`, `title:` and `tag:` prefixes, umlaut and ASCII-alias spellings, two-character terms, folder and date filters, filter-only searches and two sort orders. All 34 stay under 62 ms. The slowest is `wärmepumpe OR erdsondenfeld OR lüftungsanlage`, which matches 6 101 of the 10 000 notes and therefore has to rank most of the vault.
+The search figure is the p95 of the slowest of 35 query shapes the benchmark runs — single terms, infix terms, two- and three-term queries, phrases, exclusions, OR groups, the `path:`, `title:` and `tag:` prefixes, umlaut and ASCII-alias spellings, two-character terms, folder and date filters, filter-only searches and two sort orders. All 35 stay under 62 ms. The slowest is `wärmepumpe OR erdsondenfeld OR lüftungsanlage`, which matches 6 101 of the 10 000 notes and therefore has to rank most of the vault.
 
-**Typo tolerance costs more, and is off by default.** With "Similar" on, the same 34 shapes range from 1.8 ms to 214 ms, and nine of them pass 100 ms. That mode compares the query against the words of every candidate note, so the work grows with how much of the vault a term can plausibly reach; the budget for it is 500 ms rather than 100 ms, and it is a switch you throw when an exact search came back empty.
+**What the other file kinds cost.** `npm run bench -- --extras` adds the generated canvases and bases — 250 and 50 alongside the 10 000 notes, the proportion a real vault carries. Cold index goes from 2.06 s to 2.17 s, index memory from 50.9 MB to 52.0 MB, and the slowest search from 43.9 ms to 47.7 ms. All three stay well inside their budget.
+
+The reason it is that cheap is that a canvas is not stored the way a note is. Four fifths of a `.canvas` are ids, coordinates and colours; only the fifth that is text enters the index, with a map back to where each word sits in the file so excerpts and jump-to-hit keep working. The "Notes only" switch costs nothing on top: it is tested once per candidate before the expensive verification step, so on a mixed vault it is marginally faster than the same search unfiltered.
+
+**Typo tolerance costs more, and is off by default.** With "Similar" on, the same 35 shapes range from 1.8 ms to 214 ms, and nine of them pass 100 ms. That mode compares the query against the words of every candidate note, so the work grows with how much of the vault a term can plausibly reach; the budget for it is 500 ms rather than 100 ms, and it is a switch you throw when an exact search came back empty.
 
 The 10 000-note run is the release gate and has to be repeated before a release. Continuous integration runs the same benchmark at 2 000 notes, where a hosted runner can afford it, against budgets loose enough that only an order-of-magnitude regression fails — a shared two-core runner cannot be held to a workstation's numbers, but it can catch a linear scan that turned quadratic.
 
