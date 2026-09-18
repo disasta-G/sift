@@ -6,6 +6,8 @@ numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [2.0.0] — 2026-09-18
+
 ### Added
 
 - **Canvases and bases are searched.** Sift read `.md` and nothing else, so the
@@ -135,7 +137,8 @@ The first release. Local full-text and substring search for an Obsidian vault:
 
 Everything runs on the device; the plugin makes no network requests.
 
-[Unreleased]: https://github.com/disasta-G/sift/compare/1.5.0...HEAD
+[Unreleased]: https://github.com/disasta-G/sift/compare/2.0.0...HEAD
+[2.0.0]: https://github.com/disasta-G/sift/compare/1.5.0...2.0.0
 [1.5.0]: https://github.com/disasta-G/sift/compare/1.4.1...1.5.0
 [1.4.1]: https://github.com/disasta-G/sift/compare/1.4.0...1.4.1
 [1.4.0]: https://github.com/disasta-G/sift/compare/1.3.0...1.4.0
