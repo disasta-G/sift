@@ -51,6 +51,16 @@ jobs:
           fi
           echo "Tag and manifest agree on $tag."
 
+      - name: Cut the release notes out of the changelog
+        # Before the build on purpose: a version whose changelog entry was
+        # forgotten has to stop the release here, not publish an empty page.
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          previous=$(git describe --tags --abbrev=0 "${tag}^" 2>/dev/null || true)
+          node scripts/release-notes.mjs "$tag" "$previous" "${GITHUB_REPOSITORY}" > release-notes.md
+          echo "Release notes for $tag, compared against ${previous:-nothing}:"
+          cat release-notes.md
+
       - name: Build
         run: npm run build
 
@@ -70,8 +80,13 @@ jobs:
         # Three individual assets, never a zip: Obsidian downloads them by
         # name. manifest.json is committed rather than built, so it carries no
         # attestation - it is attached because the installer needs it.
+        #
+        # The notes come from CHANGELOG.md rather than from `--generate-notes`:
+        # this repository squashes its work into one commit per module, so the
+        # generated list of commit subjects says nothing a user of the plugin
+        # can act on, while the changelog entry was written for exactly them.
         run: |
           gh release create "${GITHUB_REF_NAME}" \
             main.js manifest.json styles.css \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+            --notes-file release-notes.md

@@ -11,6 +11,9 @@ Thumbs.db
 .idea/
 .vscode/
 
+# Release body, cut out of CHANGELOG.md by the release workflow
+release-notes.md
+
 # Test artefacts
 test/fixtures/vault/
 coverage/
