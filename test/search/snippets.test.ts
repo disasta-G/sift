@@ -71,6 +71,7 @@ function makeRecord(original: string, path = 'Notizen/Kueche.md', id = 1): Index
 	const title = name.endsWith('.md') ? name.slice(0, -3) : name;
 	return {
 		id,
+		format: 'markdown',
 		path,
 		title,
 		titleNormalized: stripFold(title),

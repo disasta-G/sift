@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { DEFAULT_STORE_BATCH_SIZE, SIFT_SCHEMA_VERSION, Store } from '../../src/index/Store';
+import { ALL_FORMATS } from '../../src/index/Formats';
 import type { IndexedFile, SchemaVersion, StoreMeta } from '../../src/types';
 
 /* -------------------------------------------------------------------------- */
@@ -12,6 +13,9 @@ import type { IndexedFile, SchemaVersion, StoreMeta } from '../../src/types';
 /* -------------------------------------------------------------------------- */
 
 const realIndexedDB: IDBFactory = indexedDB;
+
+/** The default format list, so a fingerprint test only varies the dimension it is about. */
+const FORMATS = ALL_FORMATS;
 
 let vaultCounter = 0;
 
@@ -23,6 +27,7 @@ function nextVaultId(): string {
 function makeFile(overrides: Partial<IndexedFile> = {}): IndexedFile {
 	const base: IndexedFile = {
 		id: 1,
+		format: 'markdown',
 		path: 'Notes/kaffee.md',
 		title: 'kaffee',
 		titleNormalized: 'kaffee',
@@ -62,7 +67,7 @@ function makeMeta(overrides: Partial<StoreMeta> = {}): StoreMeta {
 	const base: StoreMeta = {
 		schemaVersion: SIFT_SCHEMA_VERSION,
 		vaultId: 'vault-0',
-		settingsFingerprint: Store.fingerprintSettings('created', []),
+		settingsFingerprint: Store.fingerprintSettings('created', [], FORMATS),
 		builtAt: 1_700_000_200_000,
 		nextFileId: 42,
 	};
@@ -236,7 +241,7 @@ describe('Store round trip', () => {
 describe('Store.load', () => {
 	it('returns every file when meta matches', async () => {
 		const vaultId = nextVaultId();
-		const fingerprint = Store.fingerprintSettings('created', ['Archiv']);
+		const fingerprint = Store.fingerprintSettings('created', ['Archiv'], FORMATS);
 		const store = new Store(vaultId);
 		await store.open();
 		await store.putFiles(makeFiles(3));
@@ -317,9 +322,9 @@ describe('Store.load', () => {
 		const vaultId = nextVaultId();
 		const store = new Store(vaultId);
 		await store.open();
-		await store.writeMeta(makeMeta({ vaultId, settingsFingerprint: Store.fingerprintSettings('created', []) }));
+		await store.writeMeta(makeMeta({ vaultId, settingsFingerprint: Store.fingerprintSettings('created', [], FORMATS) }));
 		const result = await store.load(
-			{ vaultId, settingsFingerprint: Store.fingerprintSettings('date', []) },
+			{ vaultId, settingsFingerprint: Store.fingerprintSettings('date', [], FORMATS) },
 			false,
 		);
 		expect(result).toEqual({ files: null, meta: null, reject: 'settings-changed' });
@@ -331,10 +336,10 @@ describe('Store.load', () => {
 		const store = new Store(vaultId);
 		await store.open();
 		await store.writeMeta(
-			makeMeta({ vaultId, settingsFingerprint: Store.fingerprintSettings('created', ['Archiv']) }),
+			makeMeta({ vaultId, settingsFingerprint: Store.fingerprintSettings('created', ['Archiv'], FORMATS) }),
 		);
 		const result = await store.load(
-			{ vaultId, settingsFingerprint: Store.fingerprintSettings('created', ['Archiv', 'Vorlagen']) },
+			{ vaultId, settingsFingerprint: Store.fingerprintSettings('created', ['Archiv', 'Vorlagen'], FORMATS) },
 			false,
 		);
 		expect(result).toEqual({ files: null, meta: null, reject: 'settings-changed' });
@@ -618,43 +623,61 @@ describe('Store availability', () => {
 
 describe('Store.fingerprintSettings', () => {
 	it('is order-insensitive for excludedFolders', () => {
-		const a = Store.fingerprintSettings('created', ['Archiv', 'Vorlagen', 'z']);
-		const b = Store.fingerprintSettings('created', ['z', 'Archiv', 'Vorlagen']);
+		const a = Store.fingerprintSettings('created', ['Archiv', 'Vorlagen', 'z'], FORMATS);
+		const b = Store.fingerprintSettings('created', ['z', 'Archiv', 'Vorlagen'], FORMATS);
 		expect(a).toBe(b);
 	});
 
 	it('does not mutate the caller list', () => {
 		const folders = ['z', 'a'];
-		Store.fingerprintSettings('created', folders);
+		Store.fingerprintSettings('created', folders, ALL_FORMATS);
 		expect(folders).toEqual(['z', 'a']);
 	});
 
 	it('changes when an entry changes', () => {
-		const base = Store.fingerprintSettings('created', ['Archiv', 'Vorlagen']);
-		expect(Store.fingerprintSettings('created', ['Archiv', 'Vorlage'])).not.toBe(base);
-		expect(Store.fingerprintSettings('created', ['Archiv'])).not.toBe(base);
-		expect(Store.fingerprintSettings('created', ['Archiv', 'Vorlagen', 'Inbox'])).not.toBe(base);
-		expect(Store.fingerprintSettings('created', [])).not.toBe(base);
+		const base = Store.fingerprintSettings('created', ['Archiv', 'Vorlagen'], FORMATS);
+		expect(Store.fingerprintSettings('created', ['Archiv', 'Vorlage'], FORMATS)).not.toBe(base);
+		expect(Store.fingerprintSettings('created', ['Archiv'], FORMATS)).not.toBe(base);
+		expect(Store.fingerprintSettings('created', ['Archiv', 'Vorlagen', 'Inbox'], FORMATS)).not.toBe(base);
+		expect(Store.fingerprintSettings('created', [], FORMATS)).not.toBe(base);
 	});
 
 	it('changes when createdField changes', () => {
-		expect(Store.fingerprintSettings('created', ['Archiv'])).not.toBe(
-			Store.fingerprintSettings('date', ['Archiv']),
+		expect(Store.fingerprintSettings('created', ['Archiv'], FORMATS)).not.toBe(
+			Store.fingerprintSettings('date', ['Archiv'], FORMATS),
 		);
-		expect(Store.fingerprintSettings('', [])).not.toBe(Store.fingerprintSettings('created', []));
+		expect(Store.fingerprintSettings('', [], FORMATS)).not.toBe(Store.fingerprintSettings('created', [], FORMATS));
 	});
 
 	it('does not confuse field boundaries', () => {
 		// 'ab' + no folders must not collide with 'a' + folder 'b'.
-		expect(Store.fingerprintSettings('ab', [])).not.toBe(Store.fingerprintSettings('a', ['b']));
-		expect(Store.fingerprintSettings('created', ['a', 'bc'])).not.toBe(
-			Store.fingerprintSettings('created', ['ab', 'c']),
+		expect(Store.fingerprintSettings('ab', [], FORMATS)).not.toBe(Store.fingerprintSettings('a', ['b'], FORMATS));
+		expect(Store.fingerprintSettings('created', ['a', 'bc'], FORMATS)).not.toBe(
+			Store.fingerprintSettings('created', ['ab', 'c'], FORMATS),
+		);
+	});
+
+	it('is order-insensitive for indexedFormats', () => {
+		expect(Store.fingerprintSettings('created', [], ['markdown', 'canvas'])).toBe(
+			Store.fingerprintSettings('created', [], ['canvas', 'markdown']),
+		);
+	});
+
+	it('changes when a format is switched off, so the stale records cannot survive', () => {
+		const all = Store.fingerprintSettings('created', [], ['markdown', 'canvas', 'base']);
+		expect(Store.fingerprintSettings('created', [], ['markdown', 'canvas'])).not.toBe(all);
+		expect(Store.fingerprintSettings('created', [], ['markdown'])).not.toBe(all);
+	});
+
+	it('keeps the format list from colliding with a folder name', () => {
+		expect(Store.fingerprintSettings('created', ['canvas'], ['markdown'])).not.toBe(
+			Store.fingerprintSettings('created', [], ['markdown', 'canvas']),
 		);
 	});
 
 	it('is stable and 16 hex characters wide', () => {
-		const first = Store.fingerprintSettings('created', ['Archiv']);
-		const second = Store.fingerprintSettings('created', ['Archiv']);
+		const first = Store.fingerprintSettings('created', ['Archiv'], FORMATS);
+		const second = Store.fingerprintSettings('created', ['Archiv'], FORMATS);
 		expect(first).toBe(second);
 		expect(first).toMatch(/^[0-9a-f]{16}$/);
 	});

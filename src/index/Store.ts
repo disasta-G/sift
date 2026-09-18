@@ -17,6 +17,7 @@
  */
 
 import type {
+	FileFormat,
 	FileId,
 	HeadingSpan,
 	IndexedFile,
@@ -34,7 +35,7 @@ import type {
  * Persisted-schema generation. Bumping it discards the IndexedDB content and
  * forces a full rebuild on the next start.
  */
-export const SIFT_SCHEMA_VERSION: SchemaVersion = 4;
+export const SIFT_SCHEMA_VERSION: SchemaVersion = 5;
 
 /**
  * Records written per transaction when the caller injects no batch size.
@@ -216,6 +217,12 @@ function toIndexedFile(value: unknown): IndexedFile | null {
 	// Generation 4. A row from generation 3 has no `hasOpenTask`, and the open-task
 	// filter would read every one of those notes as having none.
 	if (typeof file.hasOpenTask !== 'boolean') {
+		return null;
+	}
+	// Generation 5. A row from generation 4 has no `format`, and the format
+	// filter would read every one of those notes as belonging to no kind at
+	// all - "Notes only" would then hide the entire vault.
+	if (file.format !== 'markdown' && file.format !== 'canvas' && file.format !== 'base') {
 		return null;
 	}
 	return value as IndexedFile;
@@ -587,15 +594,27 @@ export class Store {
 
 	/**
 	 * Stable hash over the settings that change index content (createdField,
-	 * excludedFolders). Order-insensitive: the folder list is sorted before
-	 * hashing, so reordering the setting does not force a rebuild while adding,
-	 * removing or editing an entry does.
+	 * excludedFolders, indexedFormats). Order-insensitive: both lists are
+	 * sorted before hashing, so reordering a setting does not force a rebuild
+	 * while adding, removing or editing an entry does.
+	 *
+	 * The format list HAS to be in here. Without it, switching Canvas off
+	 * would leave every canvas record in IndexedDB and load it again on the
+	 * next start: the Indexer only reads files the settings allow, and a
+	 * record it never looks at is a record it never drops.
 	 */
-	static fingerprintSettings(createdField: string, excludedFolders: readonly VaultPath[]): string {
+	static fingerprintSettings(
+		createdField: string,
+		excludedFolders: readonly VaultPath[],
+		indexedFormats: readonly FileFormat[],
+	): string {
 		const folders = [...excludedFolders].sort();
-		// U+0000 separates the fields and U+0001 the folders; neither can occur
-		// in a vault path or a frontmatter key, so the encoding is unambiguous.
-		const canonical = `1\u0000${createdField}\u0000${folders.length}\u0000${folders.join('\u0001')}`;
+		const formats = [...indexedFormats].sort();
+		// U+0000 separates the fields and U+0001 the list entries; neither can occur
+		// in a vault path or a frontmatter key, so the encoding is unambiguous. The leading
+		// number is the encoding's own version: it went to 2 when the format
+		// list joined, which rebuilds every existing index once, with the field.
+		const canonical = `2\u0000${createdField}\u0000${folders.length}\u0000${folders.join('\u0001')}\u0000${formats.join('\u0001')}`;
 		return fingerprint(canonical);
 	}
 

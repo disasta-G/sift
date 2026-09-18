@@ -19,10 +19,10 @@
  * ---------------------------------------------------------------------------
  * WHICH CHANGES COST A REBUILD
  * ---------------------------------------------------------------------------
- * Only `createdField` and `excludedFolders` decide what ends up in the index;
- * everything else on this tab is presentation. Both of those are edited in a
- * free-text control, so committing on every keystroke would queue a full vault
- * rebuild per character. They are debounced by {@link COMMIT_DELAY_MS} and
+ * Only `createdField`, `excludedFolders` and `indexedFormats` decide what ends
+ * up in the index; everything else on this tab is presentation. The first two
+ * are edited in a free-text control, so committing on every keystroke would
+ * queue a full vault rebuild per character. They are debounced by {@link COMMIT_DELAY_MS} and
  * flushed in {@link SiftSettingTab.hide}; the display-only settings save
  * immediately. `Plugin.saveSettings()` compares the fingerprint and rebuilds
  * only when it actually changed.
@@ -32,7 +32,8 @@ import { Notice, PluginSettingTab, Setting, debounce, getLanguage, normalizePath
 import type { App, ButtonComponent, Debouncer, SettingDefinitionItem } from 'obsidian';
 import { dateFormatLocale, setLanguage, t } from './i18n/index';
 import type { TranslationKey } from './i18n/index';
-import type { IndexStats, LanguageSetting, SiftSettings, SiftTuning, SortKey, VaultPath } from './types';
+import type { FileFormat, IndexStats, LanguageSetting, SiftSettings, SiftTuning, SortKey, VaultPath } from './types';
+import { ALL_FORMATS, OPTIONAL_FORMATS, canonicalFormats } from './index/Formats';
 import { DEFAULT_DISMISS_HOTKEY, DEFAULT_KEEP_HOTKEY, canonicalHotkey, hotkeyFromEvent } from './hotkey';
 import type { HotkeySetting } from './hotkey';
 import type SiftPlugin from './main';
@@ -66,6 +67,11 @@ export const DEFAULT_SETTINGS: SiftSettings = deepFreeze({
 	snippetCount: 2,
 	createdField: 'created',
 	excludedFolders: [],
+	// Every kind Sift can read, on. A vault's canvases and bases are notes by
+	// any other name, and a search that silently skips them is the bug this
+	// default exists to prevent; the two switches turn them off for anyone who
+	// wants the smaller index.
+	indexedFormats: ALL_FORMATS,
 	language: 'auto',
 	fuzzyByDefault: false,
 	includeSubfoldersByDefault: true,
@@ -162,6 +168,7 @@ function freshDefaults(): SiftSettings {
 		snippetCount: DEFAULT_SETTINGS.snippetCount,
 		createdField: DEFAULT_SETTINGS.createdField,
 		excludedFolders: [],
+		indexedFormats: [...ALL_FORMATS],
 		language: DEFAULT_SETTINGS.language,
 		fuzzyByDefault: DEFAULT_SETTINGS.fuzzyByDefault,
 		includeSubfoldersByDefault: DEFAULT_SETTINGS.includeSubfoldersByDefault,
@@ -196,6 +203,7 @@ function migrateRecord(source: Record<string, unknown>): SiftSettings {
 		),
 		createdField: migrateCreatedField(source.createdField),
 		excludedFolders: migrateFolders(source.excludedFolders),
+		indexedFormats: migrateFormats(source.indexedFormats),
 		language: isLanguage(source.language) ? source.language : DEFAULT_SETTINGS.language,
 		fuzzyByDefault: migrateBoolean(source.fuzzyByDefault, DEFAULT_SETTINGS.fuzzyByDefault),
 		includeSubfoldersByDefault: migrateBoolean(
@@ -210,6 +218,21 @@ function migrateRecord(source: Record<string, unknown>): SiftSettings {
 		dismissHotkey: canonicalHotkey(source.dismissHotkey) ?? DEFAULT_SETTINGS.dismissHotkey,
 		forceRebuild: migrateBoolean(source.forceRebuild, DEFAULT_SETTINGS.forceRebuild),
 	};
+}
+
+/**
+ * An ABSENT value means the setting predates this version, and those vaults get
+ * the default — every kind on — rather than Markdown only. A PRESENT value is
+ * canonicalized, which drops what Sift has no extractor for and puts Markdown
+ * back in if a hand-edited data.json removed it.
+ *
+ * The two cases have to be told apart. Folding them together would leave every
+ * existing install with canvases and bases switched off after the update, which
+ * is the opposite of the change.
+ */
+function migrateFormats(value: unknown): readonly FileFormat[] {
+	if (value === undefined) return [...ALL_FORMATS];
+	return canonicalFormats(value);
 }
 
 /** Anything that is not a plain object — null, a string, a number, an array — carries no settings. */
@@ -341,6 +364,7 @@ export class SiftSettingTab extends PluginSettingTab {
 		this.renderSnippetCount(containerEl);
 		this.renderCreatedField(containerEl);
 		this.renderExcludedFolders(containerEl);
+		this.renderIndexedFormats(containerEl);
 		this.renderLanguage(containerEl);
 		this.renderFuzzyByDefault(containerEl);
 		this.renderIncludeSubfolders(containerEl);
@@ -417,6 +441,11 @@ export class SiftSettingTab extends PluginSettingTab {
 					rows: 4,
 				},
 			},
+			...OPTIONAL_FORMATS.map((format) => ({
+				name: t(formatNameKey(format)),
+				desc: t(formatDescKey(format)),
+				control: { type: 'toggle' as const, key: formatControlKey(format) },
+			})),
 			{
 				name: t('settings.language.name'),
 				desc: t('settings.language.desc'),
@@ -489,12 +518,14 @@ export class SiftSettingTab extends PluginSettingTab {
 	}
 
 	/**
-	 * Reads a value for the declarative renderer. The two free-text controls
-	 * hold a different shape than the setting does, so they convert here and in
-	 * {@link setControlValue} rather than anywhere else.
+	 * Reads a value for the declarative renderer. The free-text control and the
+	 * format switches hold a different shape than the setting does, so they
+	 * convert here and in {@link setControlValue} rather than anywhere else.
 	 */
 	override getControlValue(key: string): unknown {
 		if (key === 'excludedFolders') return this.settings.excludedFolders.join('\n');
+		const format = formatOfControlKey(key);
+		if (format !== null) return this.settings.indexedFormats.includes(format);
 		return this.settings[key as keyof SiftSettings];
 	}
 
@@ -505,6 +536,12 @@ export class SiftSettingTab extends PluginSettingTab {
 	 * are committed late instead of on every keystroke.
 	 */
 	override setControlValue(key: string, value: unknown): void {
+		const format = formatOfControlKey(key);
+		if (format !== null) {
+			this.settings.indexedFormats = withFormat(this.settings.indexedFormats, format, value === true);
+			void this.persist();
+			return;
+		}
 		switch (key) {
 			case 'defaultSort':
 				this.settings.defaultSort = isSortKey(value) ? value : DEFAULT_SETTINGS.defaultSort;
@@ -758,6 +795,30 @@ export class SiftSettingTab extends PluginSettingTab {
 			});
 	}
 
+	/**
+	 * One switch per optional file kind. Markdown has none: it is always
+	 * indexed, and a switch that cannot be turned off is furniture.
+	 *
+	 * Switching a kind off does not merely stop indexing it — it invalidates the
+	 * settings fingerprint, so `persist()` drops the stored index and rebuilds
+	 * without the kind's records. That is what makes the switch honest: the
+	 * result list stops showing canvases the moment the switch moves, rather
+	 * than at the next full rebuild.
+	 */
+	private renderIndexedFormats(containerEl: HTMLElement): void {
+		for (const format of OPTIONAL_FORMATS) {
+			new Setting(containerEl)
+				.setName(t(formatNameKey(format)))
+				.setDesc(t(formatDescKey(format)))
+				.addToggle((toggle) =>
+					toggle.setValue(this.settings.indexedFormats.includes(format)).onChange((value) => {
+						this.settings.indexedFormats = withFormat(this.settings.indexedFormats, format, value);
+						void this.persist();
+					}),
+				);
+		}
+	}
+
 	private renderFuzzyByDefault(containerEl: HTMLElement): void {
 		new Setting(containerEl)
 			.setName(t('settings.fuzzyByDefault.name'))
@@ -948,6 +1009,46 @@ export class SiftSettingTab extends PluginSettingTab {
 /* ========================================================================== */
 
 /** Option pairs as the declarative dropdown wants them: value -> visible label. */
+/**
+ * Key under which the declarative renderer addresses one format switch.
+ *
+ * Prefixed rather than bare, because these are not settings keys: the setting
+ * is one list, and the tab presents it as one switch per kind.
+ * {@link formatOfControlKey} is the only reader, so the encoding never leaves
+ * this module.
+ */
+function formatControlKey(format: FileFormat): string {
+	return `indexFormat:${format}`;
+}
+
+/** The kind {@link formatControlKey} encoded, or `null` for every other key. */
+function formatOfControlKey(key: string): FileFormat | null {
+	if (!key.startsWith('indexFormat:')) return null;
+	const format = key.slice('indexFormat:'.length);
+	return OPTIONAL_FORMATS.find((candidate) => candidate === format) ?? null;
+}
+
+function formatNameKey(format: FileFormat): TranslationKey {
+	return format === 'canvas' ? 'settings.indexCanvas.name' : 'settings.indexBase.name';
+}
+
+function formatDescKey(format: FileFormat): TranslationKey {
+	return format === 'canvas' ? 'settings.indexCanvas.desc' : 'settings.indexBase.desc';
+}
+
+/**
+ * The format list with `format` added or removed, canonicalized.
+ *
+ * Canonicalizing on the way out is what keeps the fingerprint stable: the list
+ * always comes back in {@link ALL_FORMATS} order, so switching a kind off and
+ * on again produces the list that was there before and costs no second rebuild.
+ */
+function withFormat(current: readonly FileFormat[], format: FileFormat, wanted: boolean): readonly FileFormat[] {
+	const next = current.filter((entry) => entry !== format);
+	if (wanted) next.push(format);
+	return canonicalFormats(next);
+}
+
 function labelled(options: ReadonlyArray<readonly [string, TranslationKey]>): Record<string, string> {
 	const record: Record<string, string> = {};
 	for (const [value, labelKey] of options) record[value] = t(labelKey);

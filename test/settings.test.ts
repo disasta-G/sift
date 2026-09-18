@@ -202,6 +202,7 @@ describe('DEFAULT_SETTINGS', () => {
 			snippetCount: 2,
 			createdField: 'created',
 			excludedFolders: [],
+			indexedFormats: ['markdown', 'canvas', 'base'],
 			language: 'auto',
 			fuzzyByDefault: false,
 			includeSubfoldersByDefault: true,
@@ -338,6 +339,7 @@ describe('migrateSettings', () => {
 			snippetCount: 3,
 			createdField: 'date',
 			excludedFolders: ['Archive', 'Templates/Daily'],
+			indexedFormats: ['markdown', 'canvas', 'base'],
 			language: 'de',
 			fuzzyByDefault: true,
 			includeSubfoldersByDefault: false,
@@ -532,8 +534,8 @@ describe('SiftSettingTab.display', () => {
 		harness.tab.display();
 
 		const names = Array.from(harness.container.querySelectorAll('.setting-item-name'));
-		// Ten general rows, the index heading and its two rows.
-		expect(names.length).toBe(13);
+		// Twelve general rows, the index heading and its two rows.
+		expect(names.length).toBe(15);
 		for (const name of names) {
 			const text = (name.textContent ?? '').trim();
 			expect(text.length, name.className).toBeGreaterThan(0);
@@ -566,8 +568,8 @@ describe('SiftSettingTab.display', () => {
 		harness.tab.display();
 		const items = Array.from(harness.container.querySelectorAll('.setting-item'));
 		const firstHeading = items.findIndex((item) => item.classList.contains('setting-item-heading'));
-		// The ten general rows come first; the index heading opens the second block.
-		expect(firstHeading).toBe(10);
+		// The twelve general rows come first; the index heading opens the second block.
+		expect(firstHeading).toBe(12);
 	});
 
 	it('shows the current values in the controls', () => {
@@ -793,7 +795,9 @@ describe('changing a display-only setting', () => {
 	it('saves both toggles', () => {
 		const harness = createHarness();
 		harness.tab.display();
-		const [fuzzy, subfolders] = toggles(harness);
+		// The two format switches are drawn first; these two are the display
+		// settings this test is about.
+		const [, , fuzzy, subfolders] = toggles(harness);
 
 		fuzzy.dispatchEvent(new Event('click'));
 		subfolders.dispatchEvent(new Event('click'));
@@ -1024,7 +1028,7 @@ describe('getSettingDefinitions', () => {
 		const harness = createHarness();
 		const keys = controlKeys(harness.tab.getSettingDefinitions());
 
-		// The eight settings the declarative renderer can draw itself. `version`
+		// The ten controls the declarative renderer can draw itself. `version`
 		// and `forceRebuild` are not on the tab at all: one is the schema marker,
 		// the other is internal rebuild state. The two hotkeys are on it but are
 		// rendered rather than declared - a field that records a key press is not
@@ -1034,6 +1038,8 @@ describe('getSettingDefinitions', () => {
 				'createdField',
 				'defaultSort',
 				'excludedFolders',
+				'indexFormat:canvas',
+				'indexFormat:base',
 				'fuzzyByDefault',
 				'includeSubfoldersByDefault',
 				'language',
@@ -1046,8 +1052,32 @@ describe('getSettingDefinitions', () => {
 	it('names every control after a real settings field', () => {
 		const harness = createHarness();
 		for (const key of controlKeys(harness.tab.getSettingDefinitions())) {
+			// `indexFormat:` is the one prefix that is deliberately NOT a settings
+			// key: one list setting is presented as one switch per kind, and the
+			// tab translates in both directions. Every other control must still
+			// name a field, or the declarative tab would write into nothing.
+			if (key.startsWith('indexFormat:')) continue;
 			expect(Object.keys(DEFAULT_SETTINGS), key).toContain(key);
 		}
+	});
+
+	it('round-trips each format switch through the declarative bridge', () => {
+		const harness = createHarness();
+		expect(harness.tab.getControlValue('indexFormat:canvas')).toBe(true);
+
+		harness.tab.setControlValue('indexFormat:canvas', false);
+		expect(harness.plugin.settings.indexedFormats).toEqual(['markdown', 'base']);
+		expect(harness.tab.getControlValue('indexFormat:canvas')).toBe(false);
+
+		harness.tab.setControlValue('indexFormat:canvas', true);
+		// Back in the declared order, so the fingerprint is the one it was.
+		expect(harness.plugin.settings.indexedFormats).toEqual(['markdown', 'canvas', 'base']);
+	});
+
+	it('never lets the Markdown kind be switched off', () => {
+		const harness = createHarness();
+		harness.tab.setControlValue('indexFormat:markdown', false);
+		expect(harness.plugin.settings.indexedFormats).toContain('markdown');
 	});
 
 	/**

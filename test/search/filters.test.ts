@@ -77,6 +77,7 @@ function filtersWith(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedTo: null,
 		property: null,
 		openTasks: false,
+		formats: null,
 		note: null,
 		excludedFolders: [],
 		...overrides,
@@ -114,6 +115,13 @@ const BASE: Millis = Date.UTC(2026, 0, 1);
 function note(name: string): string {
 	return `# ${name}\n\nHier steht Kaffee im Text.\n`;
 }
+
+/** One file of every kind Sift indexes, each holding the same searchable word. */
+const FORMAT_VAULT: Record<string, FakeFileSpec> = {
+	'Notes/Heizung.md': { content: note('Heizung') },
+	'Boards/Plan.canvas': { content: JSON.stringify({ nodes: [{ type: 'text', text: 'Kaffee' }] }) },
+	'Views/Offen.base': { content: 'views:\n  - name: Kaffee\n' },
+};
 
 const FOLDER_VAULT: Record<string, FakeFileSpec> = {
 	'Projekte/Alpha.md': { content: note('Alpha'), ctime: BASE, mtime: BASE + 10 * DAY },
@@ -187,6 +195,7 @@ const VAULT_NOTES = 600;
 let small: Harness;
 let properties: Harness;
 let todos: Harness;
+let formats: Harness;
 let vault: LoadedVault;
 let fixture: Harness;
 
@@ -194,12 +203,14 @@ beforeAll(async () => {
 	small = await buildHarness(FOLDER_VAULT);
 	properties = await buildHarness(PROPERTY_VAULT);
 	todos = await buildHarness(TODO_VAULT);
+	formats = await buildHarness(FORMAT_VAULT);
 	vault = loadVault(undefined, VAULT_NOTES);
 	fixture = await buildHarness(vault.files);
 }, 120_000);
 
 afterAll(() => {
 	todos?.indexer.stop();
+	formats?.indexer.stop();
 	small?.indexer.stop();
 	properties?.indexer.stop();
 	fixture?.indexer.stop();
@@ -286,6 +297,47 @@ describe('Searcher — open-todo filter', () => {
 
 	it('combines with a folder or a date bound instead of replacing it', () => {
 		expect(passing(todos, filtersWith({ openTasks: true, createdTo: BASE - 1 }))).toEqual([]);
+	});
+});
+
+describe('Searcher — format filter', () => {
+	it('keeps notes only, while the other kinds stay in the index', () => {
+		expect(passing(formats, filtersWith({ formats: ['markdown'] }))).toEqual(['Notes/Heizung.md']);
+		expect(passing(formats, filtersWith())).toEqual([
+			'Boards/Plan.canvas',
+			'Notes/Heizung.md',
+			'Views/Offen.base',
+		]);
+	});
+
+	it('can select a single other kind just as well', () => {
+		expect(passing(formats, filtersWith({ formats: ['canvas'] }))).toEqual(['Boards/Plan.canvas']);
+		expect(passing(formats, filtersWith({ formats: ['canvas', 'base'] }))).toEqual([
+			'Boards/Plan.canvas',
+			'Views/Offen.base',
+		]);
+	});
+
+	it('narrows a query rather than replacing it', () => {
+		expect(paths(run(formats.searcher, 'kaffee', filtersWith()))).toEqual([
+			'Boards/Plan.canvas',
+			'Notes/Heizung.md',
+			'Views/Offen.base',
+		]);
+		expect(paths(run(formats.searcher, 'kaffee', filtersWith({ formats: ['markdown'] })))).toEqual([
+			'Notes/Heizung.md',
+		]);
+	});
+
+	it('is not a question on its own, so an empty query stays empty', () => {
+		// "Notes only" selects almost the whole vault. Treating it as an active
+		// filter would answer an empty query with every note there is.
+		expect(hasActiveFilters(filtersWith({ formats: ['markdown'] }))).toBe(false);
+		expect(paths(run(formats.searcher, '', filtersWith({ formats: ['markdown'] })))).toEqual([]);
+	});
+
+	it('combines with a folder instead of replacing it', () => {
+		expect(passing(formats, filtersWith({ formats: ['markdown'], folder: 'Boards' }))).toEqual([]);
 	});
 });
 

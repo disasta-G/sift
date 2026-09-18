@@ -12,10 +12,11 @@
 import { Notice, Plugin, TFile, getLanguage } from 'obsidian';
 import type { App } from 'obsidian';
 
-import type { IndexProgress, SiftSettings, SiftTuning } from './types';
+import type { FileFormat, IndexProgress, SiftSettings, SiftTuning } from './types';
 import { DEFAULT_TUNING, SiftSettingTab, migrateSettings } from './settings';
 import { setLanguage, t } from './i18n/index';
 import { SIFT_SCHEMA_VERSION, Store } from './index/Store';
+import { formatOfExtension, indexesFormat } from './index/Formats';
 import { Indexer } from './index/Indexer';
 import { Searcher } from './search/Searcher';
 import { Ranker } from './search/Ranker';
@@ -30,12 +31,17 @@ interface AppWithId {
 /** Lucide icon of the ribbon entry. */
 const RIBBON_ICON = 'search';
 
-/** The only extension Sift indexes. */
-const MARKDOWN_EXTENSION = 'md';
-
-/** Only Markdown is indexed, so everything else is dropped before it reaches the Indexer. */
-function isMarkdown(file: TFile): boolean {
-	return file.extension === MARKDOWN_EXTENSION;
+/**
+ * The kind Sift would index `file` as under `settings`, or `null`.
+ *
+ * Everything the vault emits goes through here first, so an attachment
+ * never reaches the Indexer and a kind the user switched off stops arriving
+ * the moment the setting changes.
+ */
+function indexableFormat(settings: SiftSettings, file: TFile): FileFormat | null {
+	const format = formatOfExtension(file.extension);
+	if (format === null) return null;
+	return indexesFormat(settings, format) ? format : null;
 }
 
 export default class SiftPlugin extends Plugin {
@@ -217,31 +223,62 @@ export default class SiftPlugin extends Plugin {
 	/**
 	 * Vault mutations, translated into `FileChange`s.
 	 *
-	 * Content comes from `metadataCache.changed` rather than `vault.modify`
-	 * because it fires after Obsidian has parsed the file, so the frontmatter
-	 * the Indexer reads is current. `vault.create` is registered as well since a
-	 * brand-new file reaches the cache event only after its first parse, and
-	 * `vault.rename` because a move changes no bytes and therefore produces no
-	 * cache event at all.
+	 * ---------------------------------------------------------------------
+	 * WHY MARKDOWN AND THE OTHER KINDS LISTEN TO DIFFERENT EVENTS
+	 * ---------------------------------------------------------------------
+	 * Markdown content comes from `metadataCache.changed` rather than
+	 * `vault.modify` because it fires after Obsidian has parsed the file, so the
+	 * frontmatter the Indexer reads is current. `metadataCache` only ever fires
+	 * for Markdown, though: a canvas or a base edited in place would sit stale
+	 * in the index until the next full rebuild. Those two therefore listen to
+	 * `vault.modify`.
+	 *
+	 * Deletion is the other way round and listens to `vault.delete` for every
+	 * kind, Markdown included. `metadataCache.deleted` would cover Markdown as
+	 * well, and subscribing to both would report one deleted note twice.
+	 *
+	 * The split has to stay a split. Registering `vault.modify` for Markdown as
+	 * well would index every note twice on every save — once on the raw write
+	 * and once after the parse — and the first of the two would carry
+	 * frontmatter Obsidian had not finished reading.
+	 *
+	 * `vault.create` is registered for all kinds since a brand-new file reaches
+	 * the cache event only after its first parse, and `vault.rename` because a
+	 * move changes no bytes and therefore produces no content event at all.
 	 */
 	private registerVaultEvents(): void {
 		this.registerEvent(
 			this.app.metadataCache.on('changed', (file): void => {
-				if (!isMarkdown(file)) return;
+				if (indexableFormat(this.settings, file) !== 'markdown') return;
 				this.indexer.applyChange({ kind: 'modified', file, path: file.path });
 			}),
 		);
 
 		this.registerEvent(
-			this.app.metadataCache.on('deleted', (file): void => {
-				if (!isMarkdown(file)) return;
+			this.app.vault.on('modify', (file): void => {
+				if (!(file instanceof TFile)) return;
+				const format = indexableFormat(this.settings, file);
+				// Markdown is the metadata cache's business; see above.
+				if (format === null || format === 'markdown') return;
+				this.indexer.applyChange({ kind: 'modified', file, path: file.path });
+			}),
+		);
+
+		this.registerEvent(
+			this.app.vault.on('delete', (file): void => {
+				if (!(file instanceof TFile)) return;
+				// The kind, not the setting: a file of a kind the user switched off
+				// is already out of the index — the fingerprint changed and the
+				// rebuild dropped it — while an attachment was never in it.
+				if (formatOfExtension(file.extension) === null) return;
 				this.indexer.applyChange({ kind: 'deleted', file: null, path: file.path });
 			}),
 		);
 
 		this.registerEvent(
 			this.app.vault.on('create', (file): void => {
-				if (!(file instanceof TFile) || !isMarkdown(file)) return;
+				if (!(file instanceof TFile)) return;
+				if (indexableFormat(this.settings, file) === null) return;
 				this.indexer.applyChange({ kind: 'created', file, path: file.path });
 			}),
 		);
@@ -249,12 +286,12 @@ export default class SiftPlugin extends Plugin {
 		this.registerEvent(
 			this.app.vault.on('rename', (file, oldPath): void => {
 				if (!(file instanceof TFile)) return;
-				if (isMarkdown(file)) {
+				if (indexableFormat(this.settings, file) !== null) {
 					this.indexer.applyChange({ kind: 'renamed', file, path: file.path, oldPath });
 					return;
 				}
-				// Renamed out of Markdown: whatever sat under the old path is no
-				// longer something Sift may return.
+				// Renamed into a kind Sift does not index: whatever sat under the
+				// old path is no longer something Sift may return.
 				this.indexer.applyChange({ kind: 'deleted', file: null, path: oldPath });
 			}),
 		);

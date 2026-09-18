@@ -55,6 +55,7 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedTo: null,
 		property: null,
 		openTasks: false,
+		formats: null,
 		note: null,
 		excludedFolders: [],
 		...overrides,
@@ -313,14 +314,15 @@ describe('bar order', () => {
 			'sift-sort',
 			'sift-filters__switches',
 		]);
-		// The four switches, in the group, in this order.
+		// The five switches, in the group, in this order.
 		const switches = Array.from(
 			h.bar.el.querySelectorAll('.sift-filters__switches > .sift-toggle'),
 		).map((el) => el.className);
 		expect(switches[0]).toContain('sift-toggle--note');
 		expect(switches[1]).toContain('sift-toggle--todo');
-		expect(switches[2]).toContain('sift-toggle--subfolders');
-		expect(switches[3]).toContain('sift-toggle--similar');
+		expect(switches[2]).toContain('sift-toggle--notes');
+		expect(switches[3]).toContain('sift-toggle--subfolders');
+		expect(switches[4]).toContain('sift-toggle--similar');
 	});
 });
 

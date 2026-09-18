@@ -239,11 +239,13 @@ describe('event wiring', () => {
 
 		await loadPlugin(plugin);
 
-		expect(vaultOn.mock.calls.map((call) => call[0]).sort()).toEqual(['create', 'rename']);
-		expect(cacheOn.mock.calls.map((call) => call[0]).sort()).toEqual(['changed', 'deleted']);
+		expect(vaultOn.mock.calls.map((call) => call[0]).sort()).toEqual(['create', 'delete', 'modify', 'rename']);
+		// Only 'changed'. Deletion is `vault.delete` for every kind, so subscribing
+		// to `metadataCache.deleted` as well would report one note twice.
+		expect(cacheOn.mock.calls.map((call) => call[0]).sort()).toEqual(['changed']);
 		// The point of the test: nothing subscribed behind registerEvent's back.
 		expect(registerEvent).toHaveBeenCalledTimes(vaultOn.mock.calls.length + cacheOn.mock.calls.length);
-		expect(affordances(plugin).eventRefCount()).toBe(4);
+		expect(affordances(plugin).eventRefCount()).toBe(5);
 	});
 
 	it('translates each event into the change the Indexer expects', async () => {
@@ -273,7 +275,7 @@ describe('event wiring', () => {
 		]);
 	});
 
-	it('ignores files that are not Markdown', async () => {
+	it('ignores files of a kind it has no extractor for', async () => {
 		const { app, plugin } = createHarness({ 'Notes/a.md': { content: 'alpha' } });
 		await loadPlugin(plugin);
 		const seen = recordChanges(plugin);
@@ -282,6 +284,45 @@ describe('event wiring', () => {
 		app.writeFile('Assets/photo.png', 'binary-ish, revised');
 		app.deleteFile('Assets/photo.png');
 		expect(seen).toEqual([]);
+	});
+
+	it('indexes a canvas, and keeps it current as it is edited', async () => {
+		const { app, plugin } = createHarness({ 'Notes/a.md': { content: 'alpha' } });
+		await loadPlugin(plugin);
+		const seen = recordChanges(plugin);
+
+		app.writeFile('Boards/plan.canvas', '{"nodes":[]}');
+		expect(seen).toEqual([{ kind: 'created', path: 'Boards/plan.canvas', file: 'Boards/plan.canvas' }]);
+
+		// The metadata cache never fires for a canvas; without the vault.modify
+		// subscription this edit would be invisible until the next rebuild.
+		seen.length = 0;
+		app.writeFile('Boards/plan.canvas', '{"nodes":[{"type":"text","text":"Heizung"}]}');
+		expect(seen).toEqual([{ kind: 'modified', path: 'Boards/plan.canvas', file: 'Boards/plan.canvas' }]);
+
+		seen.length = 0;
+		app.deleteFile('Boards/plan.canvas');
+		expect(seen).toEqual([{ kind: 'deleted', path: 'Boards/plan.canvas', file: null }]);
+	});
+
+	it('indexes a base file the same way', async () => {
+		const { app, plugin } = createHarness({ 'Notes/a.md': { content: 'alpha' } });
+		await loadPlugin(plugin);
+		const seen = recordChanges(plugin);
+
+		app.writeFile('Views/offen.base', 'views:\n  - name: Offen\n');
+		expect(seen).toEqual([{ kind: 'created', path: 'Views/offen.base', file: 'Views/offen.base' }]);
+	});
+
+	it('reports a saved note once, not once per event source', async () => {
+		const { app, plugin } = createHarness({ 'Notes/a.md': { content: 'alpha' } });
+		await loadPlugin(plugin);
+		const seen = recordChanges(plugin);
+
+		// vault.modify fires too, and is deliberately ignored for Markdown: the
+		// cache event is the one that has the parsed frontmatter.
+		app.writeFile('Notes/a.md', 'alpha, revised');
+		expect(seen).toEqual([{ kind: 'modified', path: 'Notes/a.md', file: 'Notes/a.md' }]);
 	});
 
 	it('drops a note that is renamed out of Markdown', async () => {
@@ -381,7 +422,7 @@ describe('startup', () => {
 		// a sink attached here, a broken index is indistinguishable from an empty
 		// vault: no notice, no status, every query answering "no results".
 		const { app, plugin } = createHarness({ 'a.md': { content: 'alpha' } });
-		vi.spyOn(app.vault, 'getMarkdownFiles').mockImplementation((): never => {
+		vi.spyOn(app.vault, 'getFiles').mockImplementation((): never => {
 			throw new Error('vault unavailable');
 		});
 
@@ -461,7 +502,7 @@ describe('settings', () => {
 		expect(Array.isArray(plugin.settings.excludedFolders)).toBe(true);
 		// Wiring survived the bad file, which is the whole point.
 		expect(affordances(plugin).commands).toHaveLength(1);
-		expect(affordances(plugin).eventRefCount()).toBe(4);
+		expect(affordances(plugin).eventRefCount()).toBe(5);
 	});
 
 	it('loads when reading data.json throws', async () => {
@@ -471,7 +512,7 @@ describe('settings', () => {
 		await loadPlugin(plugin);
 
 		expect(plugin.settings.version).toBe(1);
-		expect(affordances(plugin).eventRefCount()).toBe(4);
+		expect(affordances(plugin).eventRefCount()).toBe(5);
 	});
 
 	it('persists settings and hands them to the Indexer', async () => {

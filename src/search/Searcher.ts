@@ -258,6 +258,10 @@ function intersectInto(working: Set<FileId>, other: ReadonlySet<FileId>): Set<Fi
  *  - `excludedFolders` never counts. It comes from the settings, not from the
  *    filter bar; treating it as a filter would turn every empty query into a
  *    listing of the whole vault for anyone who has ever excluded a folder.
+ *  - `formats` never counts either, for a reason of its own: it narrows a
+ *    search rather than asking one. "Notes only" selects almost the whole
+ *    vault, so treating it as a question would answer an empty query with
+ *    every note there is - which is the outcome this rule exists to stop.
  *  - the vault ROOT with subfolders on never counts either — `folder: ''` plus
  *    `includeSubfolders: true` selects everything, which is not a narrowing. The
  *    same root WITHOUT subfolders does count: "only the notes lying loose at the
@@ -1105,6 +1109,10 @@ export class Searcher {
 		if (filters.modifiedTo !== null && file.modifiedAt > filters.modifiedTo) return false;
 		if (filters.property !== null && !hasProperty(file, filters.property)) return false;
 		if (filters.openTasks && !file.hasOpenTask) return false;
+		// A kind test, not a path test: the record carries its format, so this
+		// stays one comparison against an interned string however deep in the
+		// vault the file sits. `null` is the absent constraint; see the field.
+		if (filters.formats !== null && !filters.formats.includes(file.format)) return false;
 		// One note, by path: the narrowest filter there is, and the only one that
 		// can make the whole vault irrelevant, so it is worth testing early.
 		if (filters.note !== null && file.path !== filters.note) return false;

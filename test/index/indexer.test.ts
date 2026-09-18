@@ -1119,7 +1119,7 @@ describe('Indexer — slicing', () => {
 describe('Indexer — a build that throws', () => {
 	it('records the failure so it cannot pass for an empty vault', async () => {
 		const { app, indexer } = harness(BASE_VAULT);
-		vi.spyOn(app.vault, 'getMarkdownFiles').mockImplementation((): never => {
+		vi.spyOn(app.vault, 'getFiles').mockImplementation((): never => {
 			throw new Error('vault unavailable');
 		});
 
@@ -1142,11 +1142,11 @@ describe('Indexer — a build that throws', () => {
 
 	it('clears the failure once a build succeeds', async () => {
 		const { app, indexer } = harness(BASE_VAULT);
-		const markdownFiles = app.vault.getMarkdownFiles.bind(app.vault);
+		const allFiles = app.vault.getFiles.bind(app.vault);
 		let broken = true;
-		vi.spyOn(app.vault, 'getMarkdownFiles').mockImplementation(() => {
+		vi.spyOn(app.vault, 'getFiles').mockImplementation(() => {
 			if (broken) throw new Error('vault unavailable');
-			return markdownFiles();
+			return allFiles();
 		});
 
 		await indexer.start();
@@ -1197,5 +1197,111 @@ describe('Indexer — the fixture vault', () => {
 		// 32 bytes per Set entry against 4 per typed-array element: the same index
 		// held as sets does not fit a budget the compacted one clears easily.
 		expect(setBytes).toBeGreaterThan(compacted.approximateBytes * 2);
+	});
+});
+
+/* ========================================================================== */
+/* File formats                                                               */
+/* ========================================================================== */
+
+describe('Indexer — file formats', () => {
+	const CANVAS = JSON.stringify({
+		nodes: [
+			{ id: 'a1', type: 'text', x: 0, y: 0, width: 400, height: 200, color: '4', text: 'Wärmepumpe' },
+			{ id: 'b2', type: 'group', x: 0, y: 0, label: 'Altbau' },
+		],
+	});
+	const BASE = 'views:\n  - type: table\n    name: Offene Projekte\n';
+	const VAULT: Record<string, FakeFileSpec> = {
+		'Notes/heizung.md': { content: '# Heizung\n\nDie Pumpe läuft.\n' },
+		'Boards/plan.canvas': { content: CANVAS },
+		'Views/offen.base': { content: BASE },
+		'Assets/photo.png': { content: 'not text at all' },
+	};
+
+	function recordFor(indexer: Indexer, path: string): IndexedFile {
+		const record = [...indexer.allFiles()].find((file) => file.path === path);
+		if (record === undefined) throw new Error(`no record for ${path}`);
+		return record;
+	}
+
+	it('indexes every kind it has an extractor for, and nothing else', async () => {
+		const { indexer } = harness(VAULT);
+		await indexer.start();
+
+		expect(indexedPaths(indexer)).toEqual(['Boards/plan.canvas', 'Notes/heizung.md', 'Views/offen.base']);
+	});
+
+	it('stamps each record with the kind that produced it', async () => {
+		const { indexer } = harness(VAULT);
+		await indexer.start();
+
+		expect(recordFor(indexer, 'Notes/heizung.md').format).toBe('markdown');
+		expect(recordFor(indexer, 'Boards/plan.canvas').format).toBe('canvas');
+		expect(recordFor(indexer, 'Views/offen.base').format).toBe('base');
+	});
+
+	it('holds the canvas text, not the JSON around it', async () => {
+		const { indexer } = harness(VAULT);
+		await indexer.start();
+		const record = recordFor(indexer, 'Boards/plan.canvas');
+
+		expect(record.text).toContain('warmepumpe');
+		expect(record.text).toContain('altbau');
+		// The whole point of the compact path: the record is a fraction of the
+		// file rather than one space per skipped byte.
+		expect(record.text.length).toBeLessThan(CANVAS.length / 2);
+	});
+
+	it('leaves a kind out of the index when the setting is off', async () => {
+		const { indexer } = harness(VAULT, { settings: { indexedFormats: ['markdown'] } });
+		await indexer.start();
+
+		expect(indexedPaths(indexer)).toEqual(['Notes/heizung.md']);
+	});
+
+	it('drops the records of a kind that is switched off, rather than keeping them', async () => {
+		const store = freshStore();
+		const { indexer } = harness(VAULT, { store });
+		await indexer.start();
+		expect(indexedPaths(indexer)).toHaveLength(3);
+
+		await indexer.updateSettings(settingsWith({ indexedFormats: ['markdown'] }));
+
+		expect(indexedPaths(indexer)).toEqual(['Notes/heizung.md']);
+	});
+
+	it('picks a kind back up when the setting comes on again', async () => {
+		const { indexer } = harness(VAULT, { settings: { indexedFormats: ['markdown'] } });
+		await indexer.start();
+
+		await indexer.updateSettings(settingsWith({ indexedFormats: ['markdown', 'canvas', 'base'] }));
+
+		expect(indexedPaths(indexer)).toHaveLength(3);
+	});
+
+	it('applies an incremental change to a canvas', async () => {
+		const { app, indexer } = harness(VAULT);
+		await indexer.start();
+
+		app.writeFile('Boards/plan.canvas', JSON.stringify({ nodes: [{ type: 'text', text: 'Solarthermie' }] }));
+		indexer.applyChange(change('modified', app, 'Boards/plan.canvas'));
+		await indexer.flushPending();
+
+		const record = recordFor(indexer, 'Boards/plan.canvas');
+		expect(record.text).toContain('solarthermie');
+		expect(record.text).not.toContain('warmepumpe');
+	});
+
+	it('forgets a note that is renamed into a kind it does not index', async () => {
+		const { app, indexer } = harness(VAULT);
+		await indexer.start();
+
+		app.renameFile('Notes/heizung.md', 'Notes/heizung.txt');
+		indexer.applyChange(change('renamed', app, 'Notes/heizung.txt', 'Notes/heizung.md'));
+		await indexer.flushPending();
+
+		expect(indexedPaths(indexer)).not.toContain('Notes/heizung.txt');
+		expect(indexedPaths(indexer)).not.toContain('Notes/heizung.md');
 	});
 });

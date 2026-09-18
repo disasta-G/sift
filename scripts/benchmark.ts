@@ -259,6 +259,7 @@ const NO_FILTERS: SearchFilters = {
 	modifiedTo: null,
 	property: null,
 	openTasks: false,
+	formats: null,
 	note: null,
 	excludedFolders: [],
 };

@@ -552,8 +552,13 @@ export function toOriginalOffset(
 	doc: Pick<NormalizedDoc, 'offsetMap' | 'originalLength'>,
 	offset: NormalizedOffset,
 ): OriginalOffset {
-	if (offset <= 0) return 0;
 	const map = doc.offsetMap;
+	// Offset 0 is NOT original offset 0 for a compact document: its first
+	// segment may start a long way into the file, and a hit on the very first
+	// word would otherwise jump to the top of the file and take its snippet from
+	// there. Only the null-map case, where the two domains are the same string,
+	// may answer without consulting the map.
+	if (offset <= 0) return map === null ? 0 : map[0];
 	if (map === null) return offset > doc.originalLength ? doc.originalLength : offset;
 	return offset >= map.length ? doc.originalLength : map[offset];
 }
@@ -1459,6 +1464,106 @@ function applyFold(raw: string, blank: Uint8Array): FoldedText {
 
 /** Shared empty list, so a note without a single blank line allocates nothing. Never mutated. */
 const EMPTY_BLOCK_BREAKS = new Uint32Array(0);
+
+/* ========================================================================== */
+/* 9. Compact documents                                                       */
+/* ========================================================================== */
+
+/**
+ * One stretch of the original file that carries user text.
+ *
+ * Half-open and expressed in ORIGINAL offsets, so a caller that found the span
+ * by scanning the raw file hands it over unchanged.
+ */
+export interface TextSegment {
+	start: OriginalOffset;
+	end: OriginalOffset;
+}
+
+/**
+ * Builds a {@link NormalizedDoc} from selected stretches of `raw`.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THIS EXISTS INSTEAD OF BLANKING
+ * ---------------------------------------------------------------------------
+ * {@link normalizeDocument} keeps `text.length === raw.length` by replacing
+ * every non-text code unit with U+0020, which is what makes `offsetMap` null
+ * for essentially every note. That trade is right for Markdown, where the
+ * blanked part is a handful of `**` and list markers, and WRONG for a format
+ * whose text is a minority of its bytes: a 400 KB canvas holding 2 KB of node
+ * text would occupy 400 KB of `text`, 398 KB of it spaces, and a vault of those
+ * eats the whole memory budget without making one extra word findable.
+ *
+ * So this path pays the offset map instead — 4 bytes per code unit KEPT rather
+ * than one byte per code unit skipped. For the canvas above that is 2 KB of
+ * text plus 8 KB of map against 400 KB of blanks. The map is the mechanism the
+ * offset contract already sanctions (see the header of this file), so nothing
+ * downstream changes: Snippets, the Searcher and "jump to hit" all cross back
+ * through {@link toOriginalOffset} exactly as they do for a Markdown note.
+ *
+ * Segments are joined by ONE U+0020, and every join is recorded as a block
+ * break. Two consequences, both wanted: the words either side of a join never
+ * form a phrase — two canvas cards are not one sentence — and no trigram spans
+ * the seam as anything but whitespace, which the Searcher drops from the
+ * candidate step anyway.
+ *
+ * Segments must be ascending and non-overlapping; out-of-range and inverted
+ * ones are skipped rather than trusted, since the caller parses untrusted file
+ * content to produce them.
+ */
+export function buildCompactDocument(raw: string, segments: readonly TextSegment[]): NormalizedDoc {
+	const limit = raw.length;
+	let capacity = 0;
+	for (const segment of segments) capacity += Math.max(0, segment.end - segment.start) + 1;
+
+	const units = new Uint16Array(capacity);
+	const offsetMap = new Uint32Array(capacity + 1);
+	const breaks: number[] = [];
+	let written = 0;
+	let reached = 0;
+
+	for (const segment of segments) {
+		const start = Math.max(reached, Math.min(segment.start, limit));
+		const end = Math.max(start, Math.min(segment.end, limit));
+		if (end === start) continue;
+		if (written > 0) {
+			// The seam. Its original offset points at the START of the segment it
+			// introduces, so a snippet that begins on the separator opens on the
+			// next node rather than at the end of the previous one.
+			breaks.push(written);
+			offsetMap[written] = start;
+			units[written] = SPACE;
+			written++;
+		}
+		for (let i = start; i < end; i++) {
+			const code = raw.charCodeAt(i);
+			if (isCombiningMark(code)) continue;
+			offsetMap[written] = i;
+			units[written] = foldChar(code);
+			written++;
+		}
+		reached = end;
+	}
+
+	offsetMap[written] = limit;
+	const text = unitsToString(units, written);
+	return {
+		text,
+		originalLength: limit,
+		offsetMap: offsetMap.slice(0, written + 1),
+		// None of these formats has Markdown structure. They are not "empty
+		// because nobody got round to it": a canvas has no frontmatter and no
+		// headings, and saying so is what keeps the Ranker from weighting a
+		// region that does not exist.
+		frontmatterSpan: null,
+		headings: [],
+		blockBreaks: breaks.length === 0 ? EMPTY_BLOCK_BREAKS : Uint32Array.from(breaks),
+		words: extractWords(text),
+		tags: [],
+		frontmatter: {},
+		hasOpenTask: false,
+	};
+}
 
 /** Full document pass. Guarantees `result.offsetMap === null` implies `result.text.length === raw.length`. */
 export function normalizeDocument(raw: string, settings: Pick<SiftSettings, 'createdField'>): NormalizedDoc {

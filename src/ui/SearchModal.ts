@@ -270,6 +270,7 @@ export class SearchModal extends Modal {
 			modifiedTo: null,
 			property: null,
 			openTasks: false,
+			formats: null,
 			note: null,
 			excludedFolders: [...deps.settings.excludedFolders],
 		};

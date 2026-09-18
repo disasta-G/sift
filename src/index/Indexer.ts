@@ -66,6 +66,7 @@ import type { App, TFile } from 'obsidian';
 import type {
 	CreatedSource,
 	FileChange,
+	FileFormat,
 	FileId,
 	IndexPhase,
 	IndexProgress,
@@ -79,7 +80,8 @@ import type {
 	TrigramIndex,
 	VaultPath,
 } from '../types';
-import { aliasFold, foldFieldValue, normalizeDocument, parseDateValue, stripFold, toOriginalOffset } from './Normalizer';
+import { aliasFold, foldFieldValue, parseDateValue, stripFold, toOriginalOffset } from './Normalizer';
+import { extractDocument, formatOfExtension, indexesFormat } from './Formats';
 import { SIFT_SCHEMA_VERSION, Store } from './Store';
 
 /* -------------------------------------------------------------------------- */
@@ -396,7 +398,11 @@ export class Indexer {
 		this.tuning = tuning;
 		this.settings = { ...settings };
 		this.excluded = normalizeExcluded(settings.excludedFolders);
-		this.fingerprint = Store.fingerprintSettings(settings.createdField, settings.excludedFolders);
+		this.fingerprint = Store.fingerprintSettings(
+			settings.createdField,
+			settings.excludedFolders,
+			settings.indexedFormats,
+		);
 	}
 
 	/* ---------------------------------------------------------------------- */
@@ -428,7 +434,11 @@ export class Indexer {
 	/** Rebuilds only if the settings fingerprint changed; otherwise just swaps the reference. */
 	updateSettings(settings: SiftSettings): Promise<void> {
 		return this.enqueue(async () => {
-			const next = Store.fingerprintSettings(settings.createdField, settings.excludedFolders);
+			const next = Store.fingerprintSettings(
+				settings.createdField,
+				settings.excludedFolders,
+				settings.indexedFormats,
+			);
 			const changed = next !== this.fingerprint;
 			this.settings = { ...settings };
 			this.excluded = normalizeExcluded(settings.excludedFolders);
@@ -729,14 +739,30 @@ export class Indexer {
 		this.nextFileId = Math.max(1, nextFileId, highest + 1);
 	}
 
-	/** Markdown files the settings allow, keyed by path. */
+	/**
+	 * Files of an indexed kind that the settings allow, keyed by path.
+	 *
+	 * `getFiles()` rather than `getMarkdownFiles()`, because the vault has no
+	 * accessor per extension. It enumerates attachments too - every PNG and
+	 * PDF in the vault - so {@link formatOf} is what keeps them out, and it is
+	 * a map lookup on an extension string rather than anything that touches
+	 * the file.
+	 */
 	private liveFiles(): Map<VaultPath, TFile> {
 		const live = new Map<VaultPath, TFile>();
-		for (const file of this.app.vault.getMarkdownFiles()) {
+		for (const file of this.app.vault.getFiles()) {
+			if (this.formatOf(file) === null) continue;
 			if (this.isExcluded(file.path)) continue;
 			live.set(file.path, file);
 		}
 		return live;
+	}
+
+	/** The kind Sift indexes `file` as, or `null` when it does not index it at all. */
+	private formatOf(file: TFile): FileFormat | null {
+		const format = formatOfExtension(file.extension);
+		if (format === null) return null;
+		return indexesFormat(this.settings, format) ? format : null;
 	}
 
 	/** Drops records whose file is gone from the vault or from the indexable set. */
@@ -819,6 +845,14 @@ export class Indexer {
 	 * byte. The cold path applies the same mtime test in `staleFiles`.
 	 */
 	private async readInto(file: TFile, indexNow: boolean): Promise<void> {
+		const format = this.formatOf(file);
+		if (format === null) {
+			// Reached through the incremental path when a file was renamed into a
+			// kind Sift does not index, or out of one the settings just switched
+			// off. Dropping it is the same outcome the delete event would produce.
+			this.forget(file.path);
+			return;
+		}
 		const known = this.byPath.get(file.path);
 		if (indexNow && known !== undefined && this.reproducesRecord(known, file)) return;
 		let raw: string;
@@ -833,8 +867,8 @@ export class Indexer {
 		const existing = this.byPath.get(file.path);
 		if (existing !== undefined && indexNow) this.removeTrigrams(existing);
 		const id = existing === undefined ? this.claimId() : existing.id;
-		const doc = normalizeDocument(raw, this.settings);
-		const record = this.toRecord(id, file, doc);
+		const doc = extractDocument(format, raw, this.settings);
+		const record = this.toRecord(id, file, doc, format);
 		this.bodyAlias.set(id, packAliasForms(bodyAliasForms(doc, raw)));
 		this.byId.set(id, record);
 		this.byPath.set(record.path, record);
@@ -872,7 +906,7 @@ export class Indexer {
 	 * `title:` and `path:` — and invisible altogether when its name was the only
 	 * place the word occurred.
 	 */
-	private toRecord(id: FileId, file: TFile, doc: NormalizedDoc): IndexedFile {
+	private toRecord(id: FileId, file: TFile, doc: NormalizedDoc, format: FileFormat): IndexedFile {
 		const created = this.resolveCreated(doc, file);
 		return {
 			id,
@@ -893,6 +927,7 @@ export class Indexer {
 			createdAt: created.at,
 			modifiedAt: file.stat.mtime,
 			createdSource: created.source,
+			format,
 			size: file.stat.size,
 			indexedMtime: file.stat.mtime,
 		};
@@ -1091,9 +1126,10 @@ export class Indexer {
 	private async applyPending(entry: PendingChange): Promise<void> {
 		const origin = entry.fromPath === null ? entry.path : entry.fromPath;
 		const file = entry.kind === 'delete' ? null : (entry.file ?? this.app.vault.getFileByPath(entry.path));
-		if (file === null || this.isExcluded(entry.path)) {
-			// Deleted, gone, or moved into a folder the settings exclude. All
-			// three mean the same thing to the index.
+		if (file === null || this.isExcluded(entry.path) || this.formatOf(file) === null) {
+			// Deleted, gone, moved into a folder the settings exclude, or renamed
+			// into a kind Sift does not index — `Plan.canvas` to `Plan.canvas.bak`
+			// is the everyday case. All four mean the same thing to the index.
 			this.forget(origin);
 			if (origin !== entry.path) this.forget(entry.path);
 			return;

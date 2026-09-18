@@ -68,6 +68,7 @@ function noFilters(): SearchFilters {
 		modifiedTo: null,
 		property: null,
 		openTasks: false,
+		formats: null,
 		note: null,
 		excludedFolders: [],
 	};

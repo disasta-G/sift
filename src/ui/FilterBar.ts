@@ -59,10 +59,12 @@
 
 import { AbstractInputSuggest, Component, Scope, normalizePath, setIcon } from 'obsidian';
 import { stripFold } from '../index/Normalizer';
+import { REQUIRED_FORMAT } from '../index/Formats';
 import type { App, TFolder } from 'obsidian';
 import { dateFormatLocale, t } from '../i18n/index';
 import type { TranslationKey } from '../i18n/index';
 import type {
+	FileFormat,
 	FilterBarCallbacks,
 	FilterBarState,
 	Millis,
@@ -437,6 +439,8 @@ export class FilterBar {
 	private readonly noteLabelEl: HTMLElement;
 	private readonly openTasksEl: HTMLInputElement;
 	private readonly openTasksLabelEl: HTMLElement;
+	private readonly notesOnlyEl: HTMLInputElement;
+	private readonly notesOnlyLabelEl: HTMLElement;
 	private readonly subfoldersEl: HTMLInputElement;
 	private readonly subfoldersLabelEl: HTMLElement;
 	private readonly fuzzyEl: HTMLInputElement;
@@ -638,6 +642,18 @@ export class FilterBar {
 			this.emitFilters({ openTasks: this.openTasksEl.checked });
 		});
 
+		// Hides everything that is not a note. Like the open-todo switch, the off
+		// position is the ABSENCE of the filter and not its inverse: there is no
+		// "canvases only" position here, because the filter bar is where a search
+		// gets narrowed and not where the index gets configured.
+		const notesOnly = this.buildToggle('filter.notesOnly', 'sift-toggle--notes');
+		this.notesOnlyEl = notesOnly.input;
+		this.notesOnlyLabelEl = notesOnly.label;
+		this.notesOnlyEl.setAttr('title', t('filter.notesOnlyTooltip'));
+		this.lifecycle.registerDomEvent(this.notesOnlyEl, 'change', () => {
+			this.emitFilters({ formats: this.notesOnlyEl.checked ? [REQUIRED_FORMAT] : null });
+		});
+
 		const fuzzy = this.buildToggle('filter.similar', 'sift-toggle--similar');
 		this.fuzzyEl = fuzzy.input;
 		this.fuzzyLabelEl = fuzzy.label;
@@ -800,7 +816,13 @@ export class FilterBar {
 		// auto margin still holds them at the right end of the line they land on,
 		// where a spacer would leave them stranded on the left.
 		const switches = this.el.createDiv({ cls: 'sift-filters__switches' });
-		switches.append(this.noteLabelEl, this.openTasksLabelEl, this.subfoldersLabelEl, this.fuzzyLabelEl);
+		switches.append(
+			this.noteLabelEl,
+			this.openTasksLabelEl,
+			this.notesOnlyLabelEl,
+			this.subfoldersLabelEl,
+			this.fuzzyLabelEl,
+		);
 		spacer.remove();
 		this.el.append(this.pathChipEl, this.propertyChipEl, this.dateWrapEl, sort, switches, this.statusEl);
 
@@ -1131,6 +1153,12 @@ export class FilterBar {
 		const on = this.state.filters.openTasks;
 		if (this.openTasksEl.checked !== on) this.openTasksEl.checked = on;
 		this.openTasksLabelEl.toggleClass('sift-toggle--on', on);
+
+		// Checked exactly when the filter is present; every state the bar can
+		// produce is either `null` or the one-kind list the switch writes.
+		const notesOnly = this.state.filters.formats !== null;
+		if (this.notesOnlyEl.checked !== notesOnly) this.notesOnlyEl.checked = notesOnly;
+		this.notesOnlyLabelEl.toggleClass('sift-toggle--on', notesOnly);
 	}
 
 	private renderSubfolders(): void {
@@ -1449,6 +1477,7 @@ function filtersEqual(a: SearchFilters, b: SearchFilters): boolean {
 		a.folder === b.folder &&
 		a.includeSubfolders === b.includeSubfolders &&
 		a.openTasks === b.openTasks &&
+		formatsEqual(a.formats, b.formats) &&
 		a.createdFrom === b.createdFrom &&
 		a.createdTo === b.createdTo &&
 		a.modifiedFrom === b.modifiedFrom &&
@@ -1456,6 +1485,12 @@ function filtersEqual(a: SearchFilters, b: SearchFilters): boolean {
 		a.excludedFolders.length === b.excludedFolders.length &&
 		a.excludedFolders.every((folder, at) => folder === b.excludedFolders[at])
 	);
+}
+
+/** `null` is the absent constraint, so it is only equal to itself. Order is canonical, see `canonicalFormats`. */
+function formatsEqual(a: readonly FileFormat[] | null, b: readonly FileFormat[] | null): boolean {
+	if (a === null || b === null) return a === b;
+	return a.length === b.length && a.every((format, at) => format === b[at]);
 }
 
 function summaryEquals(a: SearchSummary | null, b: SearchSummary | null): boolean {

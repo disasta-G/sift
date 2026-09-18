@@ -63,6 +63,21 @@ export type OriginalOffset = number;
 /** Offset into normalized text, in UTF-16 code units. Equal to the original offset unless the file carries an offset map. */
 export type NormalizedOffset = number;
 
+/**
+ * A file kind Sift can index.
+ *
+ * `markdown` is the note format and the only one that carries headings,
+ * frontmatter and tags; `canvas` is Obsidian's JSON canvas and `base` its YAML
+ * view definition. The string is the discriminator everywhere except the record
+ * field, which is documented on {@link IndexedFile.format}.
+ *
+ * The set is closed on purpose. An extension the user may extend would sooner
+ * or later be pointed at a PDF or a PNG, and the Indexer would then hold a
+ * megabyte of binary noise per file in `text` — see the extractor registry in
+ * `src/index/Formats.ts`, which is the single place a new kind is added.
+ */
+export type FileFormat = 'markdown' | 'canvas' | 'base';
+
 /** Half-open range `[start, end)`. */
 export interface Span {
 	/** Inclusive start. */
@@ -76,7 +91,8 @@ export interface Span {
  * forces a full rebuild.
  *
  * Generation 2 added {@link IndexedFile.blockBreaks}, generation 3
- * {@link IndexedFile.properties}, generation 4 {@link IndexedFile.hasOpenTask}.
+ * {@link IndexedFile.properties}, generation 4 {@link IndexedFile.hasOpenTask},
+ * generation 5 {@link IndexedFile.format}.
  * The value that guards the store is
  * `SIFT_SCHEMA_VERSION` in `src/index/Store.ts`; it and this type move
  * together, and `Store.toIndexedFile` rejects a row that does not match. An
@@ -84,7 +100,7 @@ export interface Span {
  * missing — the cost is one rebuild after the update, which the settings tab
  * reports while it runs.
  */
-export type SchemaVersion = 4;
+export type SchemaVersion = 5;
 
 /* ========================================================================== */
 /* 2. Normalization                                                           */
@@ -248,6 +264,16 @@ export interface IndexedFile {
 	 * answer for a file this session never opened.
 	 */
 	hasOpenTask: boolean;
+	/**
+	 * Which extractor produced this record — and, on the query side, what the
+	 * format filter tests.
+	 *
+	 * Persisted since generation 5. It is NOT derived from the path on demand:
+	 * {@link Searcher.passesFilters} runs once per candidate, and re-deriving a
+	 * format there would mean a `lastIndexOf('.')` plus a `slice` per file per
+	 * keystroke. Stored, it is one string comparison against an interned value.
+	 */
+	format: FileFormat;
 	/** `file.stat.size` in bytes. */
 	size: number;
 	/** `file.stat.mtime` at index time. Staleness check on startup compares against this. */
@@ -500,6 +526,18 @@ export interface SearchFilters {
 	 * pinned to the note it started on even if the workspace moves underneath it.
 	 */
 	note: VaultPath | null;
+	/**
+	 * File kinds the result list may contain, or `null` for no constraint.
+	 *
+	 * Purely presentational: it narrows what a search RETURNS, never what the
+	 * Indexer read. A format the settings exclude is absent from the index and
+	 * cannot be brought back by this filter.
+	 *
+	 * Like {@link SearchFilters.openTasks}, the absent constraint is `null` and
+	 * not the empty list — an empty list is "nothing may pass", which is a state
+	 * the filter bar must never be able to produce by accident.
+	 */
+	formats: readonly FileFormat[] | null;
 	/** From settings, not from the filter bar. Applied on top of everything else. */
 	excludedFolders: readonly VaultPath[];
 }
@@ -726,6 +764,17 @@ export interface SiftSettings {
 	createdField: string;
 	/** Folders never indexed and never searched. */
 	excludedFolders: readonly VaultPath[];
+	/**
+	 * File kinds the Indexer reads. Markdown is not removable — a Sift that
+	 * indexes no notes is not a search plugin — so the setting is presented as
+	 * two switches for `canvas` and `base` and always contains `'markdown'`.
+	 *
+	 * This is one of the three settings that decide index CONTENT, so it goes
+	 * into `Store.fingerprintSettings`: without that, switching Canvas off would
+	 * leave every canvas record sitting in IndexedDB and coming back on the next
+	 * start.
+	 */
+	indexedFormats: readonly FileFormat[];
 	language: LanguageSetting;
 	/** Initial state of the "Similar" toggle. Default `false`, per plan section 3.1. */
 	fuzzyByDefault: boolean;

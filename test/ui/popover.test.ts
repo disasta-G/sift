@@ -155,6 +155,7 @@ function baseFilters(overrides: Partial<SearchFilters> = {}): SearchFilters {
 		modifiedTo: null,
 		property: null,
 		openTasks: false,
+		formats: null,
 		note: null,
 		excludedFolders: [],
 		...overrides,
