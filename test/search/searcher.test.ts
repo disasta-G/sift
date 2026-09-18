@@ -401,11 +401,38 @@ describe('Searcher — offsets map back to the original text', () => {
 /* ========================================================================== */
 
 describe('Searcher — phrases and exclusion', () => {
-	it('"wärmepumpe" -altbau excludes by substring, altbauwohnung included', () => {
-		const hits = run(small.searcher, '"wärmepumpe" -altbau');
-		expect(paths(hits)).toEqual([ONE]);
-		// Both excluded notes DO contain the phrase; only the exclusion removes them.
+	// Note TWO says "im Altbau", note THREE says "Altbauwohnung"; both carry the
+	// phrase, so every difference below is the exclusion's doing.
+	it('"wärmepumpe" -altbau takes out the standalone word only', () => {
 		expect(paths(run(small.searcher, '"wärmepumpe"'))).toEqual([ONE, THREE, TWO].sort());
+		expect(paths(run(small.searcher, '"wärmepumpe" -altbau'))).toEqual([ONE, THREE].sort());
+	});
+
+	it('-altbau* takes out every word beginning with it', () => {
+		expect(paths(run(small.searcher, '"wärmepumpe" -altbau*'))).toEqual([ONE]);
+	});
+
+	it('-*wohnung takes out every word ending on it', () => {
+		expect(paths(run(small.searcher, '"wärmepumpe" -*wohnung'))).toEqual([ONE, TWO].sort());
+	});
+
+	it('-*bau takes the standalone word and the compound ending on it, not the one continuing past it', () => {
+		expect(paths(run(small.searcher, '"wärmepumpe" -*bau'))).toEqual([ONE, THREE].sort());
+	});
+
+	it('-*bau* takes out every occurrence', () => {
+		expect(paths(run(small.searcher, '"wärmepumpe" -*bau*'))).toEqual([ONE]);
+	});
+
+	it('leaves a positive term matching inside a word, star or not', () => {
+		expect(paths(run(small.searcher, 'altbau'))).toEqual([THREE, TWO].sort());
+		expect(paths(run(small.searcher, 'altbau*'))).toEqual([THREE, TWO].sort());
+	});
+
+	it('applies the boundary to an excluded phrase as well', () => {
+		// "wärme pumpe" sits in note FOUR across a blanked `**`; the whole phrase
+		// is a word run there, so the bare exclusion removes it.
+		expect(paths(run(small.searcher, 'notiz -"wärme pumpe"')).includes(FOUR)).toBe(false);
 	});
 
 	it('matches a phrase across a blanked markdown run', () => {

@@ -62,6 +62,7 @@ interface TermShape {
 	kind: QueryTerm['kind'];
 	field: TermField;
 	raw: string;
+	boundary: QueryTerm['boundary'];
 }
 
 interface AstShape {
@@ -71,16 +72,25 @@ interface AstShape {
 	isEmpty: boolean;
 }
 
-function w(raw: string, field: TermField = 'any'): TermShape {
-	return { kind: 'word', field, raw };
+function w(raw: string, field: TermField = 'any', boundary: QueryTerm['boundary'] = 'anywhere'): TermShape {
+	return { kind: 'word', field, raw, boundary };
 }
 
-function p(raw: string, field: TermField = 'any'): TermShape {
-	return { kind: 'phrase', field, raw };
+function p(raw: string, field: TermField = 'any', boundary: QueryTerm['boundary'] = 'anywhere'): TermShape {
+	return { kind: 'phrase', field, raw, boundary };
+}
+
+/** Shape of an excluded term: without a star an exclusion matches the whole word. */
+function nw(raw: string, field: TermField = 'any'): TermShape {
+	return w(raw, field, 'whole');
+}
+
+function np(raw: string, field: TermField = 'any'): TermShape {
+	return p(raw, field, 'whole');
 }
 
 function shapeOf(term: QueryTerm): TermShape {
-	return { kind: term.kind, field: term.field, raw: term.raw };
+	return { kind: term.kind, field: term.field, raw: term.raw, boundary: term.boundary };
 }
 
 function shape(ast: QueryAst): AstShape {
@@ -118,48 +128,48 @@ interface GrammarCase {
 const GRAMMAR: readonly GrammarCase[] = [
 	{ query: 'a b', must: [w('a'), w('b')] },
 	{ query: '"a b"', must: [p('a b')] },
-	{ query: '-a', mustNot: [w('a')], isEmpty: true },
+	{ query: '-a', mustNot: [nw('a')], isEmpty: true },
 	{ query: 'a OR b', should: [[w('a'), w('b')]] },
 	// OR binds tighter than the implicit AND.
 	{ query: 'a b OR c', must: [w('a')], should: [[w('b'), w('c')]] },
 	{ query: 'a OR b c', must: [w('c')], should: [[w('a'), w('b')]] },
 	{ query: 'a OR b OR c', should: [[w('a'), w('b'), w('c')]] },
 	{ query: 'a b OR c d', must: [w('a'), w('d')], should: [[w('b'), w('c')]] },
-	{ query: '-"a b"', mustNot: [p('a b')], isEmpty: true },
+	{ query: '-"a b"', mustNot: [np('a b')], isEmpty: true },
 	{ query: '"a b" c', must: [p('a b'), w('c')] },
-	{ query: 'a -b', must: [w('a')], mustNot: [w('b')] },
-	{ query: '-a -b', mustNot: [w('a'), w('b')], isEmpty: true },
+	{ query: 'a -b', must: [w('a')], mustNot: [nw('b')] },
+	{ query: '-a -b', mustNot: [nw('a'), nw('b')], isEmpty: true },
 	// Prefixes, alone and combined with negation and quotes.
 	{ query: 'path:Projekte', must: [w('Projekte', 'path')] },
 	{ query: 'tag:hlks', must: [w('hlks', 'tag')] },
 	{ query: 'title:Küche', must: [w('Küche', 'title')] },
 	{ query: 'prop:status', must: [w('status', 'property')] },
 	{ query: 'prop:status=offen', must: [w('status=offen', 'property')] },
-	{ query: '-prop:status=offen', mustNot: [w('status=offen', 'property')], isEmpty: true },
+	{ query: '-prop:status=offen', mustNot: [nw('status=offen', 'property')], isEmpty: true },
 	{ query: 'path:"Alte Projekte"', must: [p('Alte Projekte', 'path')] },
-	{ query: '-path:"Alte Projekte"', mustNot: [p('Alte Projekte', 'path')], isEmpty: true },
-	{ query: '-tag:archiv', mustNot: [w('archiv', 'tag')], isEmpty: true },
+	{ query: '-path:"Alte Projekte"', mustNot: [np('Alte Projekte', 'path')], isEmpty: true },
+	{ query: '-tag:archiv', mustNot: [nw('archiv', 'tag')], isEmpty: true },
 	{ query: 'PATH:Projekte', must: [w('Projekte', 'path')] },
 	// An unknown field stays literal text, prefix included.
 	{ query: 'foo:bar', must: [w('foo:bar')] },
 	{ query: 'https://x.example', must: [w('https://x.example')] },
 	// `-` only negates at the start of a token.
 	{ query: 'e-mail', must: [w('e-mail')] },
-	{ query: 'a-b -c-d', must: [w('a-b')], mustNot: [w('c-d')] },
+	{ query: 'a-b -c-d', must: [w('a-b')], mustNot: [nw('c-d')] },
 	// `OR` is an operator only as a bare upper-case token.
 	{ query: 'a "OR" b', must: [w('a'), p('OR'), w('b')] },
 	{ query: 'a or b', must: [w('a'), w('or'), w('b')] },
 	{ query: 'a ORb', must: [w('a'), w('ORb')] },
 	{ query: 'path:OR', must: [w('OR', 'path')] },
-	{ query: '-OR', mustNot: [w('OR')], isEmpty: true },
+	{ query: '-OR', mustNot: [nw('OR')], isEmpty: true },
 	// An exclusion breaks the OR chain: the operator has no left operand left.
-	{ query: 'a -b OR c', must: [w('a'), w('c')], mustNot: [w('b')] },
+	{ query: 'a -b OR c', must: [w('a'), w('c')], mustNot: [nw('b')] },
 	// Whitespace runs, tabs and newlines are all just separators.
 	{ query: '  a \t b \n c ', must: [w('a'), w('b'), w('c')] },
 	{ query: '', isEmpty: true },
 	{ query: '   ', isEmpty: true },
 	{ query: '""', isEmpty: true },
-	{ query: '-onlynegative', mustNot: [w('onlynegative')], isEmpty: true },
+	{ query: '-onlynegative', mustNot: [nw('onlynegative')], isEmpty: true },
 ];
 
 describe('parseQuery — grammar', () => {
@@ -244,7 +254,7 @@ describe('parseQuery — recovery', () => {
 
 	it('reports an OR whose right operand is an exclusion', () => {
 		const ast = parse('a OR -b');
-		expect(shape(ast)).toEqual({ must: [w('a')], mustNot: [w('b')], should: [], isEmpty: false });
+		expect(shape(ast)).toEqual({ must: [w('a')], mustNot: [nw('b')], should: [], isEmpty: false });
 		expect(codes(ast)).toEqual(['dangling-operator']);
 		expect(ast.errors[0].span).toEqual({ start: 2, end: 4 });
 	});
@@ -260,7 +270,7 @@ describe('parseQuery — recovery', () => {
 
 	it('marks the unknown prefix of a negated token without swallowing the minus', () => {
 		const ast = parse('-foo:bar');
-		expect(shape(ast).mustNot).toEqual([w('foo:bar')]);
+		expect(shape(ast).mustNot).toEqual([nw('foo:bar')]);
 		expect(ast.errors[0].span).toEqual({ start: 1, end: 5 });
 	});
 
@@ -340,7 +350,60 @@ const SPAN_QUERIES: readonly string[] = [
 	'Küche\tOR\nKüchen',
 	'a b"c d"e',
 	'"say "hi" now"',
+	'-altbau*',
+	'-*bau -*bau*',
+	'-path:"*Alte Projekte*" kaffee',
+	'a*b -a*b',
 ];
+
+describe('parseQuery — the wildcard', () => {
+	it('leaves a bare exclusion on the whole word', () => {
+		expect(parse('-altbau').mustNot[0].boundary).toBe('whole');
+	});
+
+	it('opens the side the star stands on', () => {
+		expect(parse('-altbau*').mustNot[0].boundary).toBe('prefix');
+		expect(parse('-*bau').mustNot[0].boundary).toBe('suffix');
+		expect(parse('-*bau*').mustNot[0].boundary).toBe('anywhere');
+	});
+
+	it('consumes the star and keeps the text as typed', () => {
+		const term = parse('-*Altbau*').mustNot[0];
+		expect(term.raw).toBe('Altbau');
+		expect(term.normalized).toBe('altbau');
+	});
+
+	it('treats a run of stars on one side as one', () => {
+		expect(parse('-**altbau***').mustNot[0]).toMatchObject({ raw: 'altbau', boundary: 'anywhere' });
+	});
+
+	it('leaves a star in the middle of a term as text', () => {
+		expect(parse('-a*b').mustNot[0]).toMatchObject({ raw: 'a*b', boundary: 'whole' });
+	});
+
+	it('reads the star inside the quotes of a phrase, behind a field prefix too', () => {
+		expect(parse('-"alter bau*"').mustNot[0]).toMatchObject({ kind: 'phrase', raw: 'alter bau', boundary: 'prefix' });
+		expect(parse('-path:*archiv').mustNot[0]).toMatchObject({ field: 'path', raw: 'archiv', boundary: 'suffix' });
+	});
+
+	it('is a no-op on a positive term, which already matches inside a word', () => {
+		expect(parse('altbau*').must[0]).toMatchObject({ raw: 'altbau', boundary: 'anywhere' });
+		expect(parse('*altbau').must[0]).toMatchObject({ raw: 'altbau', boundary: 'anywhere' });
+		expect(parse('altbau').must[0].boundary).toBe('anywhere');
+	});
+
+	it('drops a token of nothing but stars and records a dangling operator', () => {
+		const ast = parse('-*');
+		expect(allTerms(ast)).toEqual([]);
+		expect(codes(ast)).toEqual(['dangling-operator']);
+		expect(codes(parse('kaffee ***'))).toEqual(['dangling-operator']);
+		expect(parse('kaffee ***').must.length).toBe(1);
+	});
+
+	it('drops a phrase of nothing but stars without an error, the way an empty phrase is dropped', () => {
+		expect(allTerms(parse('"**"'))).toEqual([]);
+	});
+});
 
 describe('parseQuery — spans', () => {
 	for (const query of SPAN_QUERIES) {
@@ -463,7 +526,7 @@ describe('buildTerm — precomputation', () => {
 	});
 
 	it('honours the span and the field it is given', () => {
-		const term = buildTerm('Küche', 'word', 'title', false, { start: 6, end: 11 }, TUNING);
+		const term = buildTerm('Küche', 'word', 'title', false, 'anywhere', { start: 6, end: 11 }, TUNING);
 		expect(term).toMatchObject({
 			kind: 'word',
 			field: 'title',
@@ -476,7 +539,7 @@ describe('buildTerm — precomputation', () => {
 	});
 
 	it('builds an empty term without variants or trigrams', () => {
-		const term = buildTerm('', 'word', 'any', false, { start: 0, end: 0 }, TUNING);
+		const term = buildTerm('', 'word', 'any', false, 'anywhere', { start: 0, end: 0 }, TUNING);
 		expect(term.normalized).toBe('');
 		expect(term.variants).toEqual([]);
 		expect(term.trigrams).toEqual([]);
@@ -605,6 +668,13 @@ const ROUND_TRIP: readonly string[] = [
 	'foo:bar',
 	'e-mail',
 	'"Wärmepumpe" -Altbau',
+	'-Altbau*',
+	'-*bau',
+	'-*bau*',
+	'kaffee -"alter bau*"',
+	'-path:"*Alte Projekte"',
+	'-tag:archiv*',
+	'kaffee* -altbau*',
 	'a "OR" b',
 	'"a b" "c d"',
 	'tag:küche -tag:archiv',
@@ -684,7 +754,7 @@ describe('addOrTerm', () => {
 		expect(query).toBe('kaffee maschine OR Küche -altbau');
 		expect(shape(parse(query))).toEqual({
 			must: [w('kaffee')],
-			mustNot: [w('altbau')],
+			mustNot: [nw('altbau')],
 			should: [[w('maschine'), w('Küche')]],
 			isEmpty: false,
 		});

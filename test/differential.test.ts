@@ -396,9 +396,12 @@ function buildRefNotes(vault: LoadedVault): RefNote[] {
 
 type RefField = 'any' | 'path' | 'tag' | 'title';
 
+type RefBoundary = 'whole' | 'prefix' | 'suffix' | 'anywhere';
+
 interface RefTerm {
 	field: RefField;
 	variants: string[];
+	boundary: RefBoundary;
 }
 
 interface RefQuery {
@@ -431,7 +434,7 @@ function refTokenize(raw: string): string[] {
 	return tokens;
 }
 
-/** `-`, `field:` prefix and quotes stripped; the rest becomes the literal. */
+/** `-`, `field:` prefix, quotes and the `*` wildcards stripped; the rest becomes the literal. */
 function refBuildTerm(token: string): { term: RefTerm; negated: boolean } {
 	let rest = token;
 	let negated = false;
@@ -449,7 +452,18 @@ function refBuildTerm(token: string): { term: RefTerm; negated: boolean } {
 		}
 	}
 	rest = rest.replace(/"/gu, '');
-	return { term: { field, variants: refVariants(rest) }, negated };
+	const openStart = rest.startsWith('*');
+	const openEnd = rest.length > 1 && rest.endsWith('*');
+	rest = rest.replace(/^\*+/u, '').replace(/\*+$/u, '');
+	// A positive term always matches inside a word; only an exclusion narrows.
+	let boundary: RefBoundary = 'anywhere';
+	if (negated) {
+		if (openStart && openEnd) boundary = 'anywhere';
+		else if (openEnd) boundary = 'prefix';
+		else if (openStart) boundary = 'suffix';
+		else boundary = 'whole';
+	}
+	return { term: { field, variants: refVariants(rest), boundary }, negated };
 }
 
 /** Space = AND, `OR` binds tighter, `-` negates. Same grammar, written twice. */
@@ -483,23 +497,46 @@ function refParse(raw: string): RefQuery {
 /* 4. Reference matching                                                      */
 /* ========================================================================== */
 
+function refIsWordCharacter(character: string): boolean {
+	return (character >= 'a' && character <= 'z') || (character >= '0' && character <= '9');
+}
+
+/**
+ * `haystack` holds `needle` somewhere the boundary allows — the wildcard rule,
+ * written out again from the specification rather than borrowed from the
+ * engine. `anywhere` is plain `includes`; the other three walk every occurrence
+ * and look at the character on the side that has to be open.
+ */
+function refHolds(haystack: string, needle: string, boundary: RefBoundary): boolean {
+	if (needle.length === 0) return false;
+	if (boundary === 'anywhere') return haystack.includes(needle);
+	for (let at = haystack.indexOf(needle); at >= 0; at = haystack.indexOf(needle, at + 1)) {
+		const before = at === 0 ? '' : haystack.charAt(at - 1);
+		const after = haystack.charAt(at + needle.length);
+		const startsWord = before === '' || !refIsWordCharacter(before) || !refIsWordCharacter(haystack.charAt(at));
+		const endsWord =
+			after === '' || !refIsWordCharacter(after) || !refIsWordCharacter(haystack.charAt(at + needle.length - 1));
+		if (boundary === 'prefix' ? startsWord : boundary === 'suffix' ? endsWord : startsWord && endsWord) return true;
+	}
+	return false;
+}
+
 function refTermMatches(note: RefNote, term: RefTerm): boolean {
 	for (const variant of term.variants) {
 		if (variant.length === 0) continue;
+		const holds = (haystack: string): boolean => refHolds(haystack, variant, term.boundary);
 		switch (term.field) {
 			case 'any':
-				if (note.text.includes(variant) || note.titleFolded.includes(variant) || note.pathFolded.includes(variant)) {
-					return true;
-				}
+				if (holds(note.text) || holds(note.titleFolded) || holds(note.pathFolded)) return true;
 				break;
 			case 'title':
-				if (note.titleFolded.includes(variant)) return true;
+				if (holds(note.titleFolded)) return true;
 				break;
 			case 'path':
-				if (note.pathFolded.includes(variant)) return true;
+				if (holds(note.pathFolded)) return true;
 				break;
 			case 'tag':
-				if (note.tags.some((tag) => tag.includes(variant))) return true;
+				if (note.tags.some((tag) => holds(tag))) return true;
 				break;
 		}
 	}
@@ -684,6 +721,13 @@ const PLAIN_QUERIES: readonly (readonly [string, string])[] = [
 	['not', 'heizung -fussbodenheizung'],
 	['not', 'pumpe -maschine -küche'],
 	['not', '"heat pump" -ventilation'],
+	// The wildcard opens the side it stands on; without it an exclusion is a whole word.
+	['not', 'wärmepumpe -altbau*'],
+	['not', 'wärmepumpe -*bau'],
+	['not', 'wärmepumpe -*bau*'],
+	['not', 'heizung -*heizung'],
+	['not', 'maschine -kaffee*'],
+	['not', 'küche -offerte*'],
 	// OR groups.
 	['or', 'kaffee OR tee'],
 	['or', 'wärmepumpe OR erdsondenfeld'],

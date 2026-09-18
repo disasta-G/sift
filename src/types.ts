@@ -323,6 +323,22 @@ export type TermKind = 'word' | 'phrase';
 /** Optional field restriction from a `path:` / `tag:` / `title:` prefix. */
 export type TermField = 'any' | 'path' | 'property' | 'tag' | 'title';
 
+/**
+ * How much of a word an occurrence has to cover before it counts for the term.
+ *
+ * A positive term is always `anywhere`: finding `Altbauwohnungen` for `altbau`
+ * is the point of the plugin. An exclusion is the other way round — dropping a
+ * note about Altbauwohnungen because `-altbau` was typed removes something the
+ * user never asked to remove — so an exclusion defaults to `whole` and the user
+ * opens the sides they mean with `*`:
+ *
+ *   `-altbau`    `whole`     only the standalone word
+ *   `-altbau*`   `prefix`    every word beginning with it
+ *   `-*bau`      `suffix`    every word ending on it
+ *   `-*bau*`     `anywhere`  every occurrence, the pre-1.5 behaviour
+ */
+export type TermBoundary = 'whole' | 'prefix' | 'suffix' | 'anywhere';
+
 /** One leaf of the query. */
 export interface QueryTerm {
 	kind: TermKind;
@@ -346,6 +362,8 @@ export interface QueryTerm {
 	short: boolean;
 	/** Fuzzy matching may be applied to this term. Always false inside phrases. */
 	fuzzyEligible: boolean;
+	/** Which occurrences of the literal count. Always `anywhere` for a positive term; see {@link TermBoundary}. */
+	boundary: TermBoundary;
 	/** Where the term sits in the raw query string, for inline error marking. */
 	span: Span;
 }

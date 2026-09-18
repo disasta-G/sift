@@ -1,7 +1,7 @@
 /**
  * QueryParser — single-pass tokenizer and AST builder for the query grammar:
- * space = AND, "quoted phrase", -exclusion, `a OR b`, and the optional `path:`
- * / `tag:` / `title:` prefixes.
+ * space = AND, "quoted phrase", -exclusion, `-term*` wildcard, `a OR b`, and
+ * the optional `path:` / `tag:` / `title:` prefixes.
  *
  * Never throws — every syntax problem degrades to a recorded QueryParseError
  * and the best available AST. Precomputes each term's variants and trigrams so
@@ -25,6 +25,12 @@
  *   4. A `"` at the start of the token body opens a phrase that runs to the
  *      next `"`, or to the end of the query — which is the 'unclosed-quote'
  *      recovery. Everything else runs to the next whitespace.
+ *   5. A `*` at either EDGE of the token body — inside the quotes for a phrase
+ *      — is the wildcard and is consumed; one in the middle is text. On an
+ *      exclusion it opens that side of the match, `-altbau*` taking out every
+ *      word that begins with `altbau` where bare `-altbau` takes out only the
+ *      standalone word. On a positive term it is a no-op, because a positive
+ *      term already matches anywhere inside a word. See {@link TermBoundary}.
  *
  * ---------------------------------------------------------------------------
  * SPANS
@@ -46,6 +52,7 @@ import type {
 	QueryTerm,
 	SiftTuning,
 	Span,
+	TermBoundary,
 	TermField,
 	TranslationKey,
 } from '../types';
@@ -61,6 +68,7 @@ const CHAR_FF = 0x0c;
 const CHAR_CR = 0x0d;
 const CHAR_SPACE = 0x20;
 const CHAR_QUOTE = 0x22;
+const CHAR_STAR = 0x2a;
 const CHAR_DASH = 0x2d;
 const CHAR_COLON = 0x3a;
 const CHAR_UPPER_A = 0x41;
@@ -183,6 +191,7 @@ export function buildTerm(
 	kind: QueryTerm['kind'],
 	field: TermField,
 	negated: boolean,
+	boundary: TermBoundary,
 	span: { start: number; end: number },
 	tuning: SiftTuning,
 ): QueryTerm {
@@ -209,6 +218,7 @@ export function buildTerm(
 		// the one the vault uses or it is not, and a near miss there would answer
 		// a question nobody asked.
 		fuzzyEligible: kind === 'word' && !negated && !short && field !== 'property',
+		boundary,
 		span: { start: span.start, end: span.end },
 	};
 }
@@ -223,7 +233,52 @@ interface TokenDraft {
 	kind: QueryTerm['kind'];
 	field: TermField;
 	negated: boolean;
+	/** A `*` stood at that edge of the token and was consumed. */
+	openStart: boolean;
+	openEnd: boolean;
 	span: Span;
+}
+
+/**
+ * Strips the `*` operators off the edges of a token body.
+ *
+ * Only the edges: a star in the middle is ordinary text, which is what keeps
+ * `a*b` searchable. The returned span excludes the stars, so the span contract
+ * on {@link QueryTerm.span} still holds — `raw.slice(start, end) === text`.
+ * Several stars on one side are one star; a body of nothing but stars comes
+ * back empty and the caller drops the token.
+ */
+function stripStars(
+	raw: string,
+	start: number,
+	end: number,
+): { text: string; span: Span; openStart: boolean; openEnd: boolean } {
+	let from = start;
+	let to = end;
+	let openStart = false;
+	let openEnd = false;
+	while (from < to && raw.charCodeAt(from) === CHAR_STAR) {
+		openStart = true;
+		from++;
+	}
+	while (to > from && raw.charCodeAt(to - 1) === CHAR_STAR) {
+		openEnd = true;
+		to--;
+	}
+	return { text: raw.slice(from, to), span: { start: from, end: to }, openStart, openEnd };
+}
+
+/**
+ * The boundary an exclusion asks for. A positive term is always `anywhere`:
+ * substring matching is the plugin's whole point, so a star there says what is
+ * already true and is simply consumed. See {@link TermBoundary}.
+ */
+function boundaryOf(negated: boolean, openStart: boolean, openEnd: boolean): TermBoundary {
+	if (!negated) return 'anywhere';
+	if (openStart && openEnd) return 'anywhere';
+	if (openEnd) return 'prefix';
+	if (openStart) return 'suffix';
+	return 'whole';
 }
 
 interface TokenResult {
@@ -281,21 +336,45 @@ function readToken(raw: string, start: number, end: number, errors: QueryParseEr
 			errors.push(makeError('unclosed-quote', { start: i, end }));
 		}
 		const contentEnd = close < 0 ? end : close;
-		const text = raw.slice(contentStart, contentEnd);
+		// The stars sit INSIDE the quotes — `-"alter bau*"` — because the quote is
+		// what delimits the token, so anything outside it belongs to the next one.
+		const body = stripStars(raw, contentStart, contentEnd);
 		return {
 			next: close < 0 ? end : close + 1,
 			draft:
-				text.length === 0
+				body.text.length === 0
 					? null
-					: { text, kind: 'phrase', field, negated, span: { start: contentStart, end: contentEnd } },
+					: {
+							text: body.text,
+							kind: 'phrase',
+							field,
+							negated,
+							openStart: body.openStart,
+							openEnd: body.openEnd,
+							span: body.span,
+						},
 		};
 	}
 
 	let wordEnd = i;
 	while (wordEnd < end && !isQuerySpace(raw.charCodeAt(wordEnd))) wordEnd++;
+	const body = stripStars(raw, i, wordEnd);
+	if (body.text.length === 0) {
+		// Nothing but stars: an operator with no term to operate on.
+		errors.push(makeError('dangling-operator', { start, end: wordEnd }));
+		return { next: wordEnd, draft: null };
+	}
 	return {
 		next: wordEnd,
-		draft: { text: raw.slice(i, wordEnd), kind: 'word', field, negated, span: { start: i, end: wordEnd } },
+		draft: {
+			text: body.text,
+			kind: 'word',
+			field,
+			negated,
+			openStart: body.openStart,
+			openEnd: body.openEnd,
+			span: body.span,
+		},
 	};
 }
 
@@ -353,7 +432,15 @@ export function parseQuery(raw: string, tuning: SiftTuning): QueryAst {
 		const draft = token.draft;
 		if (draft === null) continue;
 
-		const term = buildTerm(draft.text, draft.kind, draft.field, draft.negated, draft.span, tuning);
+		const term = buildTerm(
+			draft.text,
+			draft.kind,
+			draft.field,
+			draft.negated,
+			boundaryOf(draft.negated, draft.openStart, draft.openEnd),
+			draft.span,
+			tuning,
+		);
 
 		if (draft.negated) {
 			if (pendingOr !== null) {
@@ -426,10 +513,31 @@ function needsQuotes(text: string, hasPrefix: boolean): boolean {
 	return !hasPrefix && text === 'OR';
 }
 
+/**
+ * The stars to write back around an exclusion's text. A positive term carries
+ * no star: its boundary is `anywhere` by definition, so a star there would be
+ * noise the parser only has to strip again.
+ */
+function boundaryStars(term: QueryTerm, negated: boolean): { open: string; close: string } {
+	if (!negated) return { open: '', close: '' };
+	switch (term.boundary) {
+		case 'prefix':
+			return { open: '', close: '*' };
+		case 'suffix':
+			return { open: '*', close: '' };
+		case 'anywhere':
+			return { open: '*', close: '*' };
+		default:
+			return { open: '', close: '' };
+	}
+}
+
 function renderTerm(term: QueryTerm, negated: boolean): string {
 	const prefix = (negated ? '-' : '') + (term.field === 'any' ? '' : `${term.field}:`);
-	if (term.kind === 'phrase' || needsQuotes(term.raw, prefix.length > 0)) return `${prefix}"${term.raw}"`;
-	return prefix + term.raw;
+	const stars = boundaryStars(term, negated);
+	const body = stars.open + term.raw + stars.close;
+	if (term.kind === 'phrase' || needsQuotes(term.raw, prefix.length > 0)) return `${prefix}"${body}"`;
+	return prefix + body;
 }
 
 /** One string per positive group: a single term, or its OR alternatives joined. */

@@ -128,6 +128,7 @@ function makeTerm(index: number): QueryTerm {
 		trigrams: [raw.slice(0, 3)],
 		short: false,
 		fuzzyEligible: true,
+		boundary: 'anywhere',
 		span: { start: index * 6, end: index * 6 + raw.length },
 	};
 }

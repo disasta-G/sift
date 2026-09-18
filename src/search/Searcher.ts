@@ -109,6 +109,7 @@ import type {
 	SearchOptions,
 	SiftTuning,
 	Span,
+	TermBoundary,
 } from '../types';
 
 /* ========================================================================== */
@@ -163,6 +164,27 @@ function isTagCode(code: number): boolean {
 }
 
 /** Splits a literal at whitespace runs. A word term yields exactly one segment. */
+/**
+ * Whether an occurrence with these edges is one the term asked for.
+ *
+ * `anywhere` — every positive term, and an exclusion the user opened on both
+ * sides — accepts whatever the scan found, so the check costs one comparison
+ * and the normal search path is unchanged. Everything else is an exclusion
+ * narrowed with `*`; see {@link TermBoundary}.
+ */
+function acceptsEdges(boundary: TermBoundary, atWordStart: boolean, atWordEnd: boolean): boolean {
+	switch (boundary) {
+		case 'anywhere':
+			return true;
+		case 'prefix':
+			return atWordStart;
+		case 'suffix':
+			return atWordEnd;
+		default:
+			return atWordStart && atWordEnd;
+	}
+}
+
 function splitSegments(text: string): string[] {
 	const out: string[] = [];
 	let i = 0;
@@ -434,6 +456,8 @@ interface TermPlan {
 	 * edit anyway, so repeating the word scan for each of them would buy nothing.
 	 */
 	fuzzyBudget: number;
+	/** Which occurrences count. Filtered at emit time; `anywhere` costs nothing. */
+	boundary: TermBoundary;
 }
 
 /* ========================================================================== */
@@ -825,12 +849,15 @@ export class Searcher {
 				text,
 				variant,
 				(start, end) => {
+					const atWordStart = isWordBoundary(text, start);
+					const atWordEnd = isWordBoundary(text, end);
+					if (!acceptsEdges(plan.boundary, atWordStart, atWordEnd)) return;
 					out.push({
 						start: toOriginalOffset(view, start),
 						end: toOriginalOffset(view, end),
 						field: Searcher.fieldAt(file, start),
 						termIndex,
-						wholeWord: isWordBoundary(text, start) && isWordBoundary(text, end),
+						wholeWord: atWordStart && atWordEnd,
 						quality: variant.quality,
 					});
 				},
@@ -859,12 +886,15 @@ export class Searcher {
 		if (haystack.length === 0) return;
 		for (const variant of plan.variants) {
 			scanVariant(haystack, variant, (start, end) => {
+				const atWordStart = isWordBoundary(haystack, start);
+				const atWordEnd = isWordBoundary(haystack, end);
+				if (!acceptsEdges(plan.boundary, atWordStart, atWordEnd)) return;
 				out.push({
 					start,
 					end,
 					field,
 					termIndex,
-					wholeWord: isWordBoundary(haystack, start) && isWordBoundary(haystack, end),
+					wholeWord: atWordStart && atWordEnd,
 					quality: variant.quality,
 				});
 			});
@@ -888,7 +918,7 @@ export class Searcher {
 		const hitting: VariantPlan[] = [];
 		for (const variant of plan.variants) {
 			for (const tag of file.tags) {
-				if (tag.indexOf(variant.text) >= 0) {
+				if (tagHolds(tag, variant.text, plan.boundary)) {
 					hitting.push(variant);
 					break;
 				}
@@ -906,12 +936,15 @@ export class Searcher {
 				text,
 				variant,
 				(start, end) => {
+					const atWordStart = isWordBoundary(text, start);
+					const atWordEnd = isWordBoundary(text, end);
+					if (!acceptsEdges(plan.boundary, atWordStart, atWordEnd)) return;
 					const match: Match = {
 						start: toOriginalOffset(view, start),
 						end: toOriginalOffset(view, end),
 						field: 'tag',
 						termIndex,
-						wholeWord: isWordBoundary(text, start) && isWordBoundary(text, end),
+						wholeWord: atWordStart && atWordEnd,
 						quality: variant.quality,
 					};
 					if (isTagOccurrence(text, start, end, file.tags)) anchored.push(match);
@@ -1108,6 +1141,7 @@ export class Searcher {
 				term.normalized.length <= this.tuning.fuzzyShortTermMaxLength
 					? this.tuning.fuzzyMaxDistanceShort
 					: this.tuning.fuzzyMaxDistanceLong,
+			boundary: term.boundary,
 		};
 		this.plans.set(term, plan);
 		return plan;
@@ -1320,6 +1354,24 @@ function isWithinBudget(word: string, needle: string, budget: number): boolean {
 	if (word.length === 0) return false;
 	if (Math.abs(word.length - needle.length) > budget) return false;
 	return Searcher.damerauLevenshteinWithin(word, needle, budget) <= budget;
+}
+
+/**
+ * True when `tag` carries `text` in a position the boundary allows.
+ *
+ * The same rule the text scan applies, asked of the tag itself: `/` is not a
+ * word character, so `-tag:projekt` still takes out `#projekt/bau` — the
+ * hierarchy is part of the answer — while `#projektplan` survives it.
+ */
+function tagHolds(tag: string, text: string, boundary: TermBoundary): boolean {
+	if (text.length === 0) return false;
+	let from = 0;
+	for (;;) {
+		const at = tag.indexOf(text, from);
+		if (at < 0) return false;
+		if (acceptsEdges(boundary, isWordBoundary(tag, at), isWordBoundary(tag, at + text.length))) return true;
+		from = at + 1;
+	}
 }
 
 /** True when the run of tag characters around `[start, end)` is one of the file's tags. */

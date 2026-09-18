@@ -24,7 +24,7 @@ The settings tab. It reports how many notes are indexed and how much memory the 
 
 - **Substring (infix) matching.** The index is built from trigrams, so a term matches anywhere inside a word. `maschine` finds `Espressomaschine`; `sonde` finds `Erdsondenfeld`. Prefix-only search engines cannot do this.
 - **Umlaut and ß tolerance in both directions.** `kueche` finds `Küche`, `küche` finds `Kueche`, `strasse` finds `Straße`. Such a hit is marked as an alias match and ranks just below a literal one.
-- **Operators.** Spaces mean AND, `"quoted text"` is an exact phrase, `-word` excludes, `a OR b` accepts either.
+- **Operators.** Spaces mean AND, `"quoted text"` is an exact phrase, `-word` excludes that word, `-word*` excludes everything beginning with it, `a OR b` accepts either.
 - **Field prefixes.** `path:`, `tag:`, `title:` and `prop:` limit a single term to that field. `prop:status` finds every note that has a `status` property, `prop:status=offen` only those whose value contains `offen`, and `-prop:status` excludes them.
 - **Path, property and date filters.** Restrict a search to one folder, with or without its subfolders; to a note property, either by its presence alone or by a value; and to a created or modified date range, with quick picks for today, the last 7 days, 30 days and year. The property chip completes both the name and the value from the properties your vault actually uses.
 - **Open todos.** One switch narrows the result to the notes that still have something unfinished in them — `- [ ]`, `- [/]` and `- [?]` count as open, a ticked or cancelled box does not. It works on its own, with no search term at all.
@@ -88,7 +88,10 @@ Sift deliberately registers **no default hotkey**, so it cannot collide with you
 | --- | --- |
 | `wärmepumpe altbau` | Both terms must occur, anywhere in the note |
 | `"wärmepumpe im altbau"` | The exact phrase, spaces included |
-| `wärmepumpe -altbau` | Contains the first term, does not contain the second |
+| `wärmepumpe -altbau` | Contains the first term, and not the word `altbau` |
+| `wärmepumpe -altbau*` | … and no word beginning with `altbau`, `Altbauwohnung` included |
+| `wärmepumpe -*bau` | … and no word ending on `bau`, `Neubau` included |
+| `wärmepumpe -*bau*` | … and no `bau` anywhere at all |
 | `wärmepumpe OR erdsonde` | At least one of the two |
 | `path:Projekte kessel` | `kessel` anywhere, and `Projekte` in the note's path |
 | `tag:hlks lüftung` | Notes tagged `hlks` that contain `lüftung` |
@@ -96,7 +99,7 @@ Sift deliberately registers **no default hotkey**, so it cannot collide with you
 
 Two details worth knowing, because they follow from substring matching:
 
-- Exclusion is a substring test too. `-altbau` also removes a note that only contains `Altbauwohnung`.
+- A search term matches inside a word, an exclusion does not. `altbau` finds `Altbauwohnung`, while `-altbau` removes only the notes carrying `altbau` as a word of its own — taking out everything that merely contains those letters is rarely what you meant. The `*` says where you do mean it: `-altbau*` opens the end, `-*bau` the beginning, `-*bau*` both. In a phrase the star goes inside the quotes, `-"alter bau*"`. On a positive term it is unnecessary and is ignored.
 - A malformed query never fails. An unclosed quotation mark, a dangling `-` or an unknown `foo:` prefix is reported next to the search field, and Sift searches the part of the query it could read.
 
 ### Filter bar

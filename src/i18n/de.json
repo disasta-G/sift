@@ -88,7 +88,7 @@
 
 	"empty.initial.title": "Vault durchsuchen",
 	"empty.initial.body": "Gib ein Wort oder einen Wortteil ein. Sift durchsucht Titel, Überschriften, Tags und Notiztext.",
-	"empty.initial.hint": "Mit \"Anführungszeichen\" suchst du eine Phrase, mit einem Minus schliesst du ein Wort aus, und path: title: tag: grenzen einen Begriff ein.",
+	"empty.initial.hint": "Mit \"Anführungszeichen\" suchst du eine Phrase, mit einem Minus schliesst du ein Wort aus, mit -wort* alles, was damit beginnt, und path: title: tag: grenzen einen Begriff ein.",
 	"empty.indexing.title": "Index wird aufgebaut",
 	"empty.indexing.body": "Sift liest deine Notizen. Die Suche startet, sobald das erledigt ist.",
 	"empty.no-results.title": "Keine Treffer",

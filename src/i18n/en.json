@@ -88,7 +88,7 @@
 
 	"empty.initial.title": "Search your vault",
 	"empty.initial.body": "Type a word or part of a word. Sift searches titles, headings, tags and note text.",
-	"empty.initial.hint": "Use \"quotes\" for a phrase, a minus sign to exclude a word, and path: title: tag: to limit a term.",
+	"empty.initial.hint": "Use \"quotes\" for a phrase, a minus sign to exclude a word, -word* to exclude everything beginning with it, and path: title: tag: to limit a term.",
 	"empty.indexing.title": "Building the index",
 	"empty.indexing.body": "Sift is reading your notes. Results appear as soon as this is done.",
 	"empty.no-results.title": "No matches",
