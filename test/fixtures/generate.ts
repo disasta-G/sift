@@ -393,6 +393,27 @@ export interface ManifestNote {
 	tags: string[];
 }
 
+/**
+ * One generated file that is NOT a Markdown note: a canvas or a base.
+ *
+ * Kept in a list of its own rather than mixed into {@link VaultManifest.notes}
+ * so that `markerCounts` and every assertion derived from it keep meaning
+ * "notes containing this word". The extras deliberately carry no marker for the
+ * same reason.
+ */
+export interface ManifestExtra {
+	path: string;
+	title: string;
+	folder: string;
+	format: 'canvas' | 'base';
+	ctime: number;
+	mtime: number;
+	/** Bytes written to disk. For a canvas this is mostly geometry, which is the point. */
+	bytes: number;
+	/** UTF-16 length of the text an extractor should find in it. */
+	textLength: number;
+}
+
 /** The whole `_manifest.json`. */
 export interface VaultManifest {
 	seed: number;
@@ -403,7 +424,11 @@ export interface VaultManifest {
 	/** How many notes contain each marker. The expected hit count for a one-term search. */
 	markerCounts: Record<string, number>;
 	notes: ManifestNote[];
+	/** Canvas and base files, generated after the notes so the note stream stays byte-identical. */
+	extras: ManifestExtra[];
 	totalBytes: number;
+	/** Bytes of {@link VaultManifest.extras}, counted separately from `totalBytes`. */
+	extraBytes: number;
 	nfdCount: number;
 	frontmatterCount: number;
 	createdFieldCount: number;
@@ -597,6 +622,164 @@ function heading(random: Random, plan: NotePlan, terms: readonly string[]): stri
 /* 6. Generation                                                              */
 /* ========================================================================== */
 
+/* ========================================================================== */
+/* 5b. Canvas and base files                                                  */
+/* ========================================================================== */
+
+/**
+ * How many notes there are per generated canvas and per generated base.
+ *
+ * Chosen from what a real vault looks like rather than from what would stress
+ * the index: canvases are a garnish on a note collection, not half of it. A
+ * 10 000-note vault therefore gets 250 canvases and 50 bases, which is what
+ * makes the benchmark's memory line an honest answer to "what does this cost".
+ */
+const NOTES_PER_CANVAS = 40;
+const NOTES_PER_BASE = 200;
+
+/**
+ * Canvas and base files for a vault of `count` notes.
+ *
+ * Drawn from a random stream of its own, seeded off the main one and consumed
+ * only here. That is what keeps the determinism promise at the top of this file
+ * intact: the notes were already written when this runs, so their bytes cannot
+ * shift, and a 200-note vault stays a prefix of a 2000-note vault.
+ *
+ * The files carry no {@link MARKERS} word. `markerCounts` counts NOTES, and
+ * every assertion built on it would start lying the day a canvas contributed to
+ * it.
+ */
+function generateExtras(
+	seed: number,
+	count: number,
+	notes: readonly ManifestNote[],
+	outDir: string,
+): { extras: ManifestExtra[]; bytes: number } {
+	const random = makeRandom((seed ^ 0x9e37_79b9) >>> 0);
+	const extras: ManifestExtra[] = [];
+	let bytes = 0;
+
+	const emit = (path: string, title: string, folder: string, format: 'canvas' | 'base', content: string,
+		textLength: number): void => {
+		const absolute = join(outDir, path);
+		mkdirSync(dirname(absolute), { recursive: true });
+		writeFileSync(absolute, content, 'utf8');
+		const mtime = DATE_FLOOR + Math.floor(random.next() * (MTIME_CEILING - DATE_FLOOR));
+		utimesSync(absolute, mtime / 1000, mtime / 1000);
+		const size = new TextEncoder().encode(content).length;
+		bytes += size;
+		extras.push({ path, title, folder, format, ctime: mtime, mtime, bytes: size, textLength });
+	};
+
+	const canvasCount = Math.floor(count / NOTES_PER_CANVAS);
+	for (let index = 0; index < canvasCount; index++) {
+		const folder = random.pick(FOLDERS);
+		const title = `${safeName(random.pick(DE_TITLE_STEMS))} Board ${index}`;
+		const path = folder === '' ? `${title}.canvas` : `${folder}/${title}.canvas`;
+		const built = renderCanvas(random, notes);
+		emit(path, title, folder, 'canvas', built.content, built.textLength);
+	}
+
+	const baseCount = Math.floor(count / NOTES_PER_BASE);
+	for (let index = 0; index < baseCount; index++) {
+		const folder = random.pick(FOLDERS);
+		const title = `Ansicht ${index}`;
+		const path = folder === '' ? `${title}.base` : `${folder}/${title}.base`;
+		const built = renderBase(random);
+		emit(path, title, folder, 'base', built.content, built.textLength);
+	}
+
+	return { extras, bytes };
+}
+
+/**
+ * One canvas, written the way Obsidian writes them.
+ *
+ * Every node carries its geometry, its id and often a colour, because that is
+ * what makes the format expensive: the words are a small minority of the bytes,
+ * and an extractor that blanked the rest instead of dropping it would store the
+ * whole file. `textLength` records what an extractor SHOULD keep, so the
+ * benchmark can state the ratio rather than assert it blind.
+ */
+function renderCanvas(random: Random, notes: readonly ManifestNote[]): { content: string; textLength: number } {
+	const nodes: unknown[] = [];
+	const edges: unknown[] = [];
+	let textLength = 0;
+	const nodeCount = random.int(3, 9);
+
+	for (let i = 0; i < nodeCount; i++) {
+		const id = hexId(random);
+		const geometry = {
+			id,
+			x: random.int(-2000, 2000),
+			y: random.int(-2000, 2000),
+			width: random.int(200, 600),
+			height: random.int(100, 400),
+		};
+		if (random.chance(0.25) && notes.length > 0) {
+			// A file node: the embedded note's path is searchable, the same way a
+			// note's own path is.
+			const target = random.pick(notes).path;
+			nodes.push({ ...geometry, type: 'file', file: target });
+			textLength += target.length;
+			continue;
+		}
+		if (random.chance(0.15)) {
+			const label = `${random.pick(DE_TITLE_TOPICS)} ${i}`;
+			nodes.push({ ...geometry, type: 'group', label, color: String(random.int(1, 6)) });
+			textLength += label.length;
+			continue;
+		}
+		const lines: string[] = [];
+		for (let line = 0; line < random.int(1, 4); line++) {
+			lines.push(`${random.pick(DE_TITLE_STEMS)} ${random.pick(DE_TITLE_TOPICS)}`);
+		}
+		const text = lines.join('\n');
+		nodes.push({ ...geometry, type: 'text', text, color: String(random.int(1, 6)) });
+		textLength += text.length;
+	}
+
+	for (let i = 1; i < nodes.length; i++) {
+		if (!random.chance(0.4)) continue;
+		edges.push({
+			id: hexId(random),
+			fromNode: (nodes[i - 1] as { id: string }).id,
+			fromSide: 'right',
+			toNode: (nodes[i] as { id: string }).id,
+			toSide: 'left',
+		});
+	}
+
+	return { content: `${JSON.stringify({ nodes, edges }, null, '\t')}\n`, textLength };
+}
+
+/** One base file: a small YAML view definition, which is what they are. */
+function renderBase(random: Random): { content: string; textLength: number } {
+	const view = `${random.pick(DE_TITLE_STEMS)} ${random.pick(DE_TITLE_TOPICS)}`;
+	const lines = [
+		'filters:',
+		'  and:',
+		`    - status != "${random.pick(['erledigt', 'offen', 'wartet'])}"`,
+		'',
+		'views:',
+		'  - type: table',
+		`    name: ${view}`,
+		'    order:',
+		'      - file.name',
+		'      - created',
+		'',
+	];
+	const content = lines.join('\n');
+	return { content, textLength: content.length };
+}
+
+/** A 16-character hex id, the shape Obsidian gives canvas nodes. */
+function hexId(random: Random): string {
+	let out = '';
+	for (let i = 0; i < 16; i++) out += '0123456789abcdef'[random.int(0, 15)];
+	return out;
+}
+
 export interface GenerateOptions {
 	count: number;
 	outDir: string;
@@ -667,6 +850,8 @@ export function generateVault(options: GenerateOptions): GenerateResult {
 		});
 	}
 
+	const extrasBuilt = generateExtras(options.seed, options.count, notes, options.outDir);
+
 	const markerCounts: Record<string, number> = {};
 	for (const marker of MARKERS) markerCounts[marker] = 0;
 	for (const note of notes) {
@@ -681,7 +866,9 @@ export function generateVault(options: GenerateOptions): GenerateResult {
 		markers: MARKERS,
 		markerCounts,
 		notes,
+		extras: extrasBuilt.extras,
 		totalBytes,
+		extraBytes: extrasBuilt.bytes,
 		nfdCount,
 		frontmatterCount,
 		createdFieldCount,

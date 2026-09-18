@@ -103,15 +103,26 @@ interface BenchOptions {
 	vaultDir: string;
 	runs: number;
 	jsonPath: string | null;
+	/**
+	 * Index the generated canvas and base files as well.
+	 *
+	 * Off by default so the stated targets keep meaning what they say: they
+	 * are written per NOTE, and a run that quietly added a fifth kind of file
+	 * would move the gate without anyone deciding to. Run it both ways to see
+	 * what the other kinds cost.
+	 */
+	extras: boolean;
 }
 
-const USAGE = 'usage: tsx scripts/benchmark.ts [--count 10000] [--vault <dir>] [--runs 3] [--json <path>]';
+const USAGE =
+	'usage: tsx scripts/benchmark.ts [--count 10000] [--vault <dir>] [--runs 3] [--json <path>] [--extras]';
 
 export function parseArgs(argv: readonly string[]): BenchOptions {
 	let count = REFERENCE_COUNT;
 	let vaultDir = DEFAULT_VAULT_DIR;
 	let runs = 3;
 	let jsonPath: string | null = null;
+	let extras = false;
 
 	for (let i = 0; i < argv.length; i++) {
 		const flag = argv[i];
@@ -130,13 +141,15 @@ export function parseArgs(argv: readonly string[]): BenchOptions {
 			if (value === undefined) throw new Error('--json needs a file path');
 			jsonPath = resolve(value);
 			i++;
+		} else if (flag === '--extras') {
+			extras = true;
 		} else if (flag === '--help' || flag === '-h') {
 			throw new Error(USAGE);
 		} else {
 			throw new Error(`unknown flag "${String(flag)}"\n${USAGE}`);
 		}
 	}
-	return { count, vaultDir, runs, jsonPath };
+	return { count, vaultDir, runs, jsonPath, extras };
 }
 
 function positiveInteger(flag: string, value: string | undefined): number {
@@ -326,6 +339,10 @@ function buildQueries(vault: LoadedVault): readonly BenchQuery[] {
 		{ label: 'fuzzy typo (short)', query: 'heizng', filters: NO_FILTERS },
 		{ label: 'fuzzy typo (long)', query: 'kafeemaschine', filters: NO_FILTERS },
 		{ label: 'filter: folder', query: 'heizung', filters: withFilters({ folder: 'Projekte' }) },
+		// The "Notes only" switch. Measured against the same query unfiltered:
+		// the filter runs once per candidate BEFORE verification, so it should
+		// cost nothing measurable and, on a mixed vault, save a little.
+		{ label: 'filter: notes only', query: 'maschine', filters: withFilters({ formats: ['markdown'] }) },
 		{
 			label: 'filter: folder, no subfolders',
 			query: 'notiz',
@@ -787,8 +804,9 @@ async function main(): Promise<number> {
 	const engine = await loadEngine();
 
 	ensureVault(engine, options.vaultDir, options.count);
-	const { app, vault } = engine.loadFakeApp(options.vaultDir);
-	const noteCount = Object.keys(vault.files).length;
+	const { app, vault } = engine.loadFakeApp(options.vaultDir, undefined, { extras: options.extras });
+	const fileCount = Object.keys(vault.files).length;
+	const noteCount = fileCount - vault.extras.length;
 
 	const scale = noteCount / REFERENCE_COUNT;
 	const coldBudget = COLD_INDEX_BUDGET_MS * scale;
@@ -799,6 +817,19 @@ async function main(): Promise<number> {
 	console.log(
 		`  vault ${options.vaultDir}\n  ${formatCount(noteCount)} notes · ${formatBytes(vault.totalLength * 2)} of UTF-16 text · ${options.runs} run(s)`,
 	);
+	if (vault.extras.length > 0) {
+		const canvases = vault.extras.filter((extra) => extra.format === 'canvas');
+		const bases = vault.extras.filter((extra) => extra.format === 'base');
+		const canvasBytes = canvases.reduce((sum, extra) => sum + extra.bytes, 0);
+		const canvasText = canvases.reduce((sum, extra) => sum + extra.textLength, 0);
+		// The ratio the compact extractor exists for: a canvas that is 20% text
+		// would cost five times as much stored as blanks of its own length.
+		const share = canvasBytes === 0 ? 0 : Math.round((canvasText / canvasBytes) * 100);
+		console.log(
+			`  plus ${formatCount(canvases.length)} canvases and ${formatCount(bases.length)} bases;`
+				+ ` ${String(share)}% of a canvas is text, and only that share is stored`,
+		);
+	}
 	if (noteCount !== REFERENCE_COUNT) {
 		console.log(
 			`  NOTE: the index budgets are stated for ${formatCount(REFERENCE_COUNT)} notes. They are scaled linearly to ${formatCount(noteCount)} here,`,

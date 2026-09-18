@@ -45,6 +45,7 @@ function vaultWith(source: VaultManifest | null): LoadedVault {
 		manifest: source,
 		notesByPath: new Map(notes.map((entry) => [entry.path, entry])),
 		totalLength: 0,
+		extras: [],
 	};
 }
 

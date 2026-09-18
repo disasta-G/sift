@@ -998,6 +998,7 @@ describe('Differential — decomposed source', () => {
 			files: NFD_FILES,
 			manifest: null,
 			notesByPath: new Map(),
+			extras: [],
 			totalLength: 0,
 		});
 		const path = decomposed('Küche/Notiz Küche.md');
