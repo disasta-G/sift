@@ -1038,6 +1038,65 @@ rather than the light mockup's visible edge, so both themes agree.
 	color: var(--text-faint);
 }
 
+.sift-empty__restore {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	align-self: center;
+	max-width: 100%;
+	margin-top: 12px;
+	padding: 5px 12px;
+	border: 1px solid var(--background-modifier-border);
+	border-radius: 6px;
+	background-color: transparent;
+	box-shadow: none;
+	font-family: inherit;
+	font-size: 13px;
+	line-height: 1.5;
+	color: var(--text-muted);
+	cursor: pointer;
+}
+
+.sift-empty__restore:hover {
+	background-color: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
+.sift-empty__restore:focus-visible {
+	outline: 2px solid var(--background-modifier-border-focus);
+	outline-offset: 1px;
+}
+
+.sift-empty__restore-icon {
+	display: flex;
+	flex-shrink: 0;
+}
+
+.sift-empty__restore-icon svg {
+	width: 14px;
+	height: 14px;
+}
+
+.sift-empty__restore-label {
+	flex-shrink: 0;
+	white-space: nowrap;
+}
+
+/* The query can be a whole sentence; it gives way before the label does. */
+.sift-empty__restore-query {
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	color: var(--text-normal);
+}
+
+.sift-empty__restore-query::before {
+	content: "·";
+	margin-right: 8px;
+	color: var(--text-faint);
+}
+
 .sift-empty__errors {
 	display: flex;
 	flex-direction: column;

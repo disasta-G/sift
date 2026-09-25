@@ -90,6 +90,29 @@ export interface SearchModalDeps {
 	snippets: Snippets;
 	settings: SiftSettings;
 	tuning: SiftTuning;
+	/** Where the last run is left for the next opening. Absent = nothing is remembered. */
+	memory?: SearchMemory;
+}
+
+/** Everything that decides what a run finds, as it stood when the overlay closed. */
+export interface SavedSearch {
+	readonly query: string;
+	readonly filters: SearchFilters;
+	readonly sort: SortKey;
+	readonly fuzzy: boolean;
+}
+
+/**
+ * The slot the last run is kept in between two openings.
+ *
+ * It lives on the plugin instance and nowhere else: not in `data.json`, not in
+ * IndexedDB. A search term is the user's own business, and one that survived a
+ * restart would be a record of what they looked for — so the memory ends with
+ * the Obsidian session, which is exactly as long as "I opened the wrong note"
+ * needs it.
+ */
+export interface SearchMemory {
+	last: SavedSearch | null;
 }
 
 /** Cards kept above and below the visible window so a fast scroll does not show gaps. */
@@ -334,6 +357,7 @@ export class SearchModal extends Modal {
 	}
 
 	override onClose(): void {
+		this.remember();
 		this.opened = false;
 		this.searchSeq++;
 		this.clearDebounce();
@@ -378,6 +402,47 @@ export class SearchModal extends Modal {
 	setQuery(query: string): void {
 		this.query = query;
 		if (this.inputEl !== null && this.inputEl.value !== query) this.inputEl.value = query;
+	}
+
+	/** The run a restore would bring back, or `null` when there is none to offer. */
+	lastSearch(): SavedSearch | null {
+		return this.deps.memory?.last ?? null;
+	}
+
+	/**
+	 * Puts the previous run back: query, filters, sort order and similar matching,
+	 * and searches it at once.
+	 *
+	 * "This note" is the one piece that is not carried over as it was. It names
+	 * the note that was open when THAT run started; restored into an overlay
+	 * called from another note, the switch would claim "this note" over a file
+	 * that is not this one. It is kept only when the note is still the same.
+	 */
+	restoreLastSearch(): Promise<void> {
+		const last = this.lastSearch();
+		if (last === null) return Promise.resolve();
+		this.filters = {
+			...last.filters,
+			excludedFolders: [...last.filters.excludedFolders],
+			note: last.filters.note !== null && last.filters.note === this.activeNote ? last.filters.note : null,
+		};
+		this.sort = last.sort;
+		this.fuzzy = last.fuzzy;
+		this.setQuery(last.query);
+		this.filterBar?.setState({
+			filters: this.filters,
+			sort: this.sort,
+			fuzzy: this.fuzzy,
+			activeNote: this.activeNote,
+			summary: this.summary,
+		});
+		this.updateFilterToggle();
+		const input = this.inputEl;
+		if (input !== null) {
+			input.focus();
+			input.setSelectionRange(input.value.length, input.value.length);
+		}
+		return this.runSearch(true);
 	}
 
 	/** Debounced unless `immediate`. Aborts the in-flight search. */
@@ -439,6 +504,8 @@ export class SearchModal extends Modal {
 		const el = this.emptyEl;
 		if (el === null) return;
 
+		if (kind === 'initial') this.buildRestoreButton(el);
+
 		if (kind === 'query-error') {
 			const list = el.createDiv({ cls: 'sift-empty__errors' });
 			for (const error of this.lastErrors) {
@@ -456,6 +523,54 @@ export class SearchModal extends Modal {
 					.createDiv({ cls: 'sift-empty__error', text: t('index.failureReason', { reason }) });
 			}
 		}
+	}
+
+	/**
+	 * The way back to the previous run, offered only on the untouched overlay.
+	 *
+	 * The initial state is the one moment nothing has been asked yet, so there is
+	 * nothing the button could throw away. It names the query it would bring back,
+	 * because "restore" alone does not say whether that is the search you mean.
+	 */
+	private buildRestoreButton(el: HTMLElement): void {
+		const last = this.lastSearch();
+		if (last === null) return;
+		const button = el.createEl('button', {
+			cls: 'sift-empty__restore',
+			attr: { type: 'button' },
+		});
+		setIcon(button.createSpan({ cls: 'sift-empty__restore-icon' }), 'history');
+		button.createSpan({ cls: 'sift-empty__restore-label', text: t('search.restore') });
+		const query = last.query.trim();
+		if (query.length > 0) button.createSpan({ cls: 'sift-empty__restore-query', text: query });
+		button.createEl('kbd', { cls: 'sift-key', text: '↑' });
+		this.lifecycle.registerDomEvent(button, 'click', () => {
+			void this.restoreLastSearch();
+		});
+	}
+
+	/** True while the overlay asks for nothing and there is a previous run to offer. */
+	private canRestore(): boolean {
+		return (
+			this.lastSearch() !== null && this.query.trim().length === 0 && !hasActiveFilters(this.filters)
+		);
+	}
+
+	/**
+	 * Leaves this run for the next opening. A run that asked for nothing — empty
+	 * query, no filter — does not overwrite one that did: closing an overlay you
+	 * opened by mistake must not cost you the search before it.
+	 */
+	private remember(): void {
+		const memory = this.deps.memory;
+		if (memory === undefined) return;
+		if (this.query.trim().length === 0 && !hasActiveFilters(this.filters)) return;
+		memory.last = {
+			query: this.query,
+			filters: { ...this.filters, excludedFolders: [...this.filters.excludedFolders] },
+			sort: this.sort,
+			fuzzy: this.fuzzy,
+		};
 	}
 
 	/** The empty panel, whatever put it there. Tears the list down and hands back the panel. */
@@ -987,6 +1102,12 @@ export class SearchModal extends Modal {
 		this.scope.register([], 'ArrowUp', (evt) => {
 			if (this.filterBarHasFocus()) return true;
 			evt.preventDefault();
+			// On the untouched overlay there is no list to move in, so the key does
+			// what it does in a shell: it brings the previous search back.
+			if (this.items.length === 0 && this.canRestore()) {
+				void this.restoreLastSearch();
+				return false;
+			}
 			this.moveSelection(-1);
 			return false;
 		});

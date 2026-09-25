@@ -6,6 +6,16 @@ numbers follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **The last search comes back on request.** Opening a note from the list and
+  finding it was the wrong one used to mean typing the query and setting the
+  filters again. The empty overlay now offers a "Restore last search" button
+  that names the query, and `↑` in the empty field does the same. Query,
+  filters, sort order and similar matching all return; "This note" only when
+  the overlay is called from the same note. The search is held in memory for
+  the running session and never written to disk.
+
 ## [2.0.0] — 2026-09-18
 
 ### Added

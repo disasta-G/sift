@@ -6,6 +6,7 @@
 	"search.label": "Suchbegriff",
 	"search.close": "Suche schliessen",
 	"search.clear": "Eingabe löschen",
+	"search.restore": "Letzte Suche wiederherstellen",
 	"search.count": "{n} Treffer · {ms} ms",
 	"search.countOne": "1 Treffer · {ms} ms",
 	"search.countNone": "Keine Treffer · {ms} ms",

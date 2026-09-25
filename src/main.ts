@@ -22,6 +22,7 @@ import { Searcher } from './search/Searcher';
 import { Ranker } from './search/Ranker';
 import { Snippets } from './search/Snippets';
 import { SearchModal } from './ui/SearchModal';
+import type { SearchMemory } from './ui/SearchModal';
 
 /** `App.appId` is real and per-vault, but absent from the published typings. */
 interface AppWithId {
@@ -61,6 +62,9 @@ export default class SiftPlugin extends Plugin {
 	 * never got that far — a plugin disabled mid-load must still unload cleanly.
 	 */
 	private composed = false;
+
+	/** The last search, for the overlay's restore button. In memory only; see {@link SearchMemory}. */
+	private readonly searchMemory: SearchMemory = { last: null };
 
 	override async onload(): Promise<void> {
 		await this.loadSettings();
@@ -157,6 +161,7 @@ export default class SiftPlugin extends Plugin {
 				snippets: this.snippets,
 				settings: this.settings,
 				tuning: this.tuning,
+				memory: this.searchMemory,
 			},
 			initialQuery,
 		).open();
